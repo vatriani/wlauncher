@@ -1,6 +1,18 @@
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
 #include "types.h"
+#include <wayland-client.h>
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "xdg-shell-client-protocol.h"
+
 #include "wayland-core.h"
 #include "window.h"
+#include "parser.h"
 
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
@@ -10,6 +22,12 @@ int main(int argc, char **argv) {
     ctx->running = 1;
     ctx->width = 2560;
     ctx->height = 24;
+
+    /* Anwendungen direkt beim Start indizieren */
+    scan_applications(ctx);
+    /* NEU: Holt die Farben live aus deiner hyprland.conf via IPC */
+    fetch_hyprland_colors(ctx);
+    ctx->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 
     ctx->display = wl_display_connect(NULL);
     if (!ctx->display) return 1;
@@ -36,18 +54,19 @@ int main(int argc, char **argv) {
     wl_surface_commit(ctx->surface);
     wl_display_flush(ctx->display);
 
-    printf("wlauncher: Modularisiertes System geladen. Starte Schleife...\n");
+    printf("wlauncher: System bereit. Warte auf Tastatur-Eingaben...\n");
 
-    struct timespec start_time, current_time;
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
-
+    /* 5. DIE UNENDLICHE EVENT-SCHLEIFE (Pure Effizienz) */
+    /* Schläft tief im Kernel, bis ein Tastendruck oder Fokus-Event reinkommt.
+       Die Abbruch-Logik (ESC) läuft komplett asynchron im Keyboard-Callback! */
     while (ctx->running && wl_display_dispatch(ctx->display) != -1) {
-        clock_gettime(CLOCK_MONOTONIC, &current_time);
-        if (current_time.tv_sec - start_time.tv_sec >= 3) {
-            ctx->running = 0;
-        }
+        /* Hier passiert im Thread-Kontext nichts, Wayland leitet die Signale an die Callback-Listener */
     }
 
+    printf("wlauncher: Beende Programm und raeume Speicher auf.\n");
+
+    if (ctx->keyboard)      wl_keyboard_destroy(ctx->keyboard);
+    if (ctx->seat)          wl_seat_destroy(ctx->seat);
     if (ctx->buffer)        wl_buffer_destroy(ctx->buffer);
     if (ctx->layer_surface) zwlr_layer_surface_v1_destroy(ctx->layer_surface);
     if (ctx->surface)       wl_surface_destroy(ctx->surface);
@@ -55,6 +74,9 @@ int main(int argc, char **argv) {
     if (ctx->compositor)    wl_compositor_destroy(ctx->compositor);
     if (ctx->shm)           wl_shm_destroy(ctx->shm);
     if (ctx->registry)      wl_registry_destroy(ctx->registry);
+    if (ctx->xkb_state)     xkb_state_unref(ctx->xkb_state);
+    if (ctx->xkb_keymap)    xkb_keymap_unref(ctx->xkb_keymap);
+    if (ctx->xkb_context)   xkb_context_unref(ctx->xkb_context);
 
     wl_display_flush(ctx->display);
     wl_display_disconnect(ctx->display);

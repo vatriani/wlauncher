@@ -16,6 +16,7 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *la
 
 static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface) {
     register struct app_context *ctx = (struct app_context *)data;
+    (void)layer_surface; // Eliminiert die Warnung im Compiler restlos!
     ctx->running = 0;
 }
 
