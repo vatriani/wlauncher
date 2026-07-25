@@ -5,11 +5,22 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *la
     register struct app_context *ctx = (struct app_context *)data;
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 
-    if (width > 0) ctx->width = width;
-    if (height > 0) ctx->height = height;
+    /* HIER PASSIERT DIE WAYLAND-MAGIE: */
+    /* Hyprland übergibt in 'width' die exakte Pixelbreite des aktiven Monitors */
+    if (width > 0) {
+        ctx->width = width;
+    }
+    if (height > 0) {
+        ctx->height = height;
+    }
 
-    if (!ctx->configured) {
+    /* Zeichnet den Frame erst, wenn wir eine gültige Breite vom Server haben */
+    if (ctx->width > 0 && !ctx->configured) {
         ctx->configured = 1;
+        draw_frame(ctx);
+    }
+    /* Sicherheitsnetz: Wenn sich die Fenstergröße im Betrieb ändert (z.B. Monitor-Wechsel) */
+    else if (ctx->width > 0 && ctx->configured) {
         draw_frame(ctx);
     }
 }

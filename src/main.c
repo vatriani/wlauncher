@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
     register struct app_context *ctx = &stack_ctx;
     memset(ctx, 0, sizeof(struct app_context));
     ctx->running = 1;
-    ctx->width = 2560;
+    ctx->width = 0;
     ctx->height = 24;
 
     /* Anwendungen direkt beim Start indizieren */

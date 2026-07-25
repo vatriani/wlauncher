@@ -64,6 +64,9 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
     (void)serial; (void)time; (void)keyboard;
 
     if (state == 1) {
+        /* FIX: Die Deklaration MUSS hier stehen, damit alle nachfolgenden Blöcke darauf zugreifen können! */
+        uint32_t xkb_keycode = key + 8;
+
         if (key == KEY_ESC) {
             ctx->running = 0;
             return;
@@ -72,67 +75,111 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
         /* NAVIGATION: Pfeiltaste RECHTS springt zum nächsten Vorschlag */
         if (key == KEY_RIGHT && ctx->matched_count > 0) {
             ctx->matched_index = (ctx->matched_index + 1) % ctx->matched_count;
-            draw_frame(ctx);
+            if (ctx->configured && ctx->width > 0) {
+                draw_frame(ctx);
+            }
             return;
         }
 
         /* NAVIGATION: Pfeiltaste LINKS springt zum vorherigen Vorschlag */
         if (key == KEY_LEFT && ctx->matched_count > 0) {
             ctx->matched_index = (ctx->matched_index - 1 + ctx->matched_count) % ctx->matched_count;
-            draw_frame(ctx);
+            if (ctx->configured && ctx->width > 0) {
+                draw_frame(ctx);
+            }
             return;
         }
 
-        /* AUSFÜHREN BEI ENTER */
-        if (key == KEY_ENTER) {
-            char *exec_cmd = NULL;
+        /* AUSFÜHREN BEI ENTER (Kugelsicher für Befehle mit Argumenten) */
+       if (key == KEY_ENTER) {
+           char *exec_cmd = NULL;
 
-            /* Wenn Treffer da sind, nimm den aktuell ausgewählten Index! */
-            if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
-                exec_cmd = ctx->matched_apps[ctx->matched_index].exec;
-                printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
-                       ctx->matched_index, ctx->matched_apps[ctx->matched_index].name, exec_cmd);
-            } else {
-                /* Fallback, falls gar nichts matcht: Führe die rohe Eingabe aus */
-                exec_cmd = ctx->input_buffer;
-            }
+           if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
+               exec_cmd = ctx->matched_apps[ctx->matched_index].exec;
+               printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
+                      ctx->matched_index, ctx->matched_apps[ctx->matched_index].name, exec_cmd);
+           } else {
+               exec_cmd = ctx->input_buffer;
+           }
 
-            if (exec_cmd && exec_cmd[0] != '\0') {
+           if (exec_cmd && exec_cmd[0] != '\0') {
                pid_t pid = fork();
                if (pid == 0) {
                    setsid();
-                   char *args[] = {exec_cmd, NULL};
 
-                   /* KORREKTUR: Der echte POSIX-Systemaufruf */
-                   execvp(exec_cmd, args);
+                   /* KUGELSICHERER TOKENIZER: Zerlegt den Befehl bei Leerzeichen */
+                   char *args[64]; /* Maximal 63 Argumente erlaubt */
+                   int arg_count = 0;
 
+                   /* Wir arbeiten auf einer lokalen Kopie, um den RAM-Cache nicht zu zerstoeren */
+                   char cmd_copy[256];
+                   strncpy(cmd_copy, exec_cmd, sizeof(cmd_copy) - 1);
+                   cmd_copy[sizeof(cmd_copy) - 1] = '\0';
+
+                   char *token = cmd_copy;
+                   while (*token && arg_count < 63) {
+                       /* Führende Leerzeichen überspringen */
+                       while (*token == ' ') token++;
+                       if (*token == '\0') break;
+
+                       /* Dieses Wort als Argument registrieren */
+                       args[arg_count++] = token;
+
+                       /* Bis zum nächsten Leerzeichen laufen */
+                       while (*token && *token != ' ') token++;
+
+                       /* Wort mit Null-Byte beenden und Pointer weiterschieben */
+                       if (*token == ' ') {
+                           *token = '\0';
+                           token++;
+                       }
+                   }
+                   args[arg_count] = NULL; /* Array muss laut POSIX mit NULL enden */
+
+                   /* Wenn wir mindestens ein Argument extrahiert haben, feuern wir execvp */
+                   if (arg_count > 0) {
+                       execvp(args[0], args);
+                   }
+
+                   /* Falls execvp fehlschlaegt (z.B. Befehl existiert nicht mehr) */
                    _exit(1);
-                }
-            }
-            ctx->running = 0;
-            return;
-        }
+               }
+           }
+           ctx->running = 0;
+           return;
+       }
 
+        /* BACKSPACE: Zeichen löschen */
         if (key == KEY_BACKSPACE && ctx->input_length > 0) {
             ctx->input_buffer[--ctx->input_length] = '\0';
-            ctx->matched_index = 0; /* Reset des Auswahl-Index bei Änderung */
-            draw_frame(ctx);
+            ctx->matched_index = 0;
+            if (ctx->configured && ctx->width > 0) {
+                draw_frame(ctx);
+            }
+            printf("Eingabe: %s\n", ctx->input_buffer);
             return;
         }
 
-        /* Die universelle XKB-Eingabe (Auswahl-Index bei jedem neuen Buchstaben nullen!) */
+        /* DIE UNIVERSELLE MAGIE */
         char utf8_buf[8] = {0};
-        if (ctx->xkb_state && xkb_state_key_get_utf8(ctx->xkb_state, key + 8, utf8_buf, sizeof(utf8_buf)) > 0) {
-            if (utf8_buf[0] >= 32 && ctx->input_length < 255) {
-                ctx->input_buffer[ctx->input_length++] = utf8_buf[0];
+        if (ctx->xkb_state && xkb_state_key_get_utf8(ctx->xkb_state, xkb_keycode, utf8_buf, sizeof(utf8_buf)) > 0) {
+            char c = utf8_buf[0];
+
+            if (c >= 32 && ctx->input_length < 255) {
+                ctx->input_buffer[ctx->input_length++] = c;
                 ctx->input_buffer[ctx->input_length] = '\0';
 
-                ctx->matched_index = 0; /* Erster Treffer ist initial fokussiert */
-                draw_frame(ctx);
+                ctx->matched_index = 0;
+                printf("Eingabe: %s\n", ctx->input_buffer);
+
+                if (ctx->configured && ctx->width > 0) {
+                    draw_frame(ctx);
+                }
             }
         }
     }
 }
+
 
 static const struct wl_keyboard_listener keyboard_listener = {
     .keymap = keyboard_handle_keymap,

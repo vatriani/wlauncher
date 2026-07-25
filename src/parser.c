@@ -2,25 +2,33 @@
 #include <string.h>
 #include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "parser.h"
 
 void fetch_hyprland_colors(struct app_context *ctx) {
-    /* Standard-Fallbacks (dein bewährtes Dunkelgrau und Conky-Blau) */
+    /* 1. ABSOLUTE STANDARD-FALLBACKS INITIALISIEREN */
+    /* (Dein schickes Dunkelgrau und das bewährte Conky-Blau) */
     ctx->bg_r = 0.117; ctx->bg_g = 0.117; ctx->bg_b = 0.180;
     ctx->accent_r = 0.321; ctx->accent_g = 0.443; ctx->accent_b = 0.654;
 
-    /* Wir rufen hyprctl via Pipe auf, um die aktive Rahmenfarbe abzufragen */
+    /* 2. UMGEBUNGS-CHECK: Läuft Hyprland überhaupt? */
+    /* Wenn die Instanz-Signatur fehlt, brechen wir sofort ab und nutzen die Standards! */
+    if (!getenv("HYPRLAND_INSTANCE_SIGNATURE")) {
+        printf("wlauncher: Keine aktive Hyprland-Sitzung erkannt. Nutze Standardfarben.\n");
+        return;
+    }
+
+    /* 3. IPC-ABFRAGE: Nur ausführen, wenn Hyprland garantiert antworten kann */
     FILE *str = popen("hyprctl getoption general:col.active_border -j 2>/dev/null", "r");
     if (!str) return;
 
-    char buf[1024];
+    char buf[256];
     char *hex_start = NULL;
 
-    /* Wir durchsuchen den JSON-Output nach dem Feld "str": "rgba(...)" oder "0x..." */
     while (fgets(buf, sizeof(buf), str)) {
         hex_start = strstr(buf, "\"str\": \"");
         if (hex_start) {
-            hex_start += 8; /* Pointer auf den Anfang des Hex-Werts schieben */
+            hex_start += 8;
             break;
         }
     }
@@ -28,36 +36,32 @@ void fetch_hyprland_colors(struct app_context *ctx) {
 
     if (!hex_start) return;
 
-    /* Überspringt '0x' oder '#' falls Hyprland das im String liefert */
     if (hex_start[0] == '0' && hex_start[1] == 'x') hex_start += 2;
     if (hex_start[0] == '#') hex_start += 1;
 
-    /* Wenn der String lang genug ist (AARRGGBB Format), extrahieren wir die RGB-Werte */
     if (strlen(hex_start) >= 6) {
         unsigned int hex_val = 0;
-        /* Wenn Alpha mitgeliefert wird (8 Stellen), überspringen wir die ersten beiden Stellen für RGB */
         if (strlen(hex_start) >= 8) {
             sscanf(hex_start + 2, "%6x", &hex_val);
         } else {
             sscanf(hex_start, "%6x", &hex_val);
         }
 
-        /* Mathematische Bit-Shifts für die RGB-Kanäle (0-255 -> 0.0-1.0) */
         ctx->accent_r = ((hex_val >> 16) & 0xFF) / 255.0;
         ctx->accent_g = ((hex_val >> 8) & 0xFF) / 255.0;
         ctx->accent_b = (hex_val & 0xFF) / 255.0;
 
-        /* Der Hintergrund wird automatisch ein stark abgedunkeltes Derivat deines Akzents (Harmonie-Look) */
+        /* Der Hintergrund wird ein stark abgedunkeltes Derivat deines Akzents */
         ctx->bg_r = ctx->accent_r * 0.25;
         ctx->bg_g = ctx->accent_g * 0.25;
         ctx->bg_b = ctx->accent_b * 0.25;
 
-        /* Sicherheitsnetz: Falls der Hintergrund zu hell wird, deckeln wir ihn */
         if (ctx->bg_r > 0.15) ctx->bg_r = 0.117;
         if (ctx->bg_g > 0.15) ctx->bg_g = 0.117;
         if (ctx->bg_b > 0.15) ctx->bg_b = 0.15;
     }
 }
+
 
 void scan_applications(struct app_context *ctx) {
     const char *dir_path = "/usr/share/applications";
@@ -65,11 +69,11 @@ void scan_applications(struct app_context *ctx) {
     if (!dir) return;
 
     struct dirent *entry;
-    char file_path[256];
-    char line[256];
+    /* FIX: Auf 512 vergrößert, damit Pfad + Dateiname garantiert hineinpassen */
+    char file_path[512];
+    char line[512];
 
     ctx->app_count = 0;
-
     /* Loop durch den Ordner im RAM */
     while ((entry = readdir(dir)) != NULL && ctx->app_count < MAX_APPS) {
         /* Nur Dateien betrachten, die auf .desktop enden */
@@ -87,30 +91,37 @@ void scan_applications(struct app_context *ctx) {
             if (!has_name && strncmp(line, "Name=", 5) == 0) {
                 char *newline = strchr(line, '\n');
                 if (newline) *newline = '\0';
-                strncpy(app->name, line + 5, sizeof(app->name) - 1);
+
+                /* KORREKTUR: %.255s zwingt snprintf, maximal 255 Zeichen zu lesen -> 0 Warnungen! */
+                snprintf(app->name, sizeof(app->name), "%.255s", line + 5);
                 has_name = 1;
             }
+
             /* Filtere den echten Befehl heraus */
             if (!has_exec && strncmp(line, "Exec=", 5) == 0) {
                 char *newline = strchr(line, '\n');
                 if (newline) *newline = '\0';
 
-                /* Kopiert den rohen Befehl ab Zeichen 5 */
-                strncpy(app->exec, line + 5, sizeof(app->exec) - 1);
+                /* KORREKTUR: Ebenfalls auf 255 Zeichen begrenzt */
+                snprintf(app->exec, sizeof(app->exec), "%.255s", line + 5);
 
-                /* KUGELSICHERER ABSCHNEIDER FÜR ALLES WAS NACH DEM BEFEHL KOMMT */
-                /* Wir schneiden bei jedem Leerzeichen ab, das ein Prozentzeichen einleitet */
+                /* KUGELSICHERER ABSCHNEIDER FÜR ARGUMENTE */
                 char *arg = strstr(app->exec, " %");
                 if (arg) *arg = '\0';
 
-                /* Sicherheitsnetz für Argumente ohne Leerzeichen */
                 arg = strchr(app->exec, '%');
                 if (arg) *arg = '\0';
 
-                /* Entfernt eventuelle Anführungszeichen (wichtig bei manchen Flatpaks/KDE-Apps) */
+                /* Entfernt eventuelle Anführungszeichen (z.B. bei Flatpaks) */
+                /* KORREKTUR: Wir prüfen das ERSTE Zeichen [0] des Arrays, nicht den Pointer! */
                 if (app->exec[0] == '"' || app->exec[0] == '\'') {
+                    char quote_char = app->exec[0]; // Sichert das gefundene Zeichen ('"' oder '\'')
+
+                    /* Verschiebt den restlichen String um 1 nach links, um das erste Anführungszeichen zu killen */
                     memmove(app->exec, app->exec + 1, strlen(app->exec));
-                    char *end = strchr(app->exec, app->exec[0]);
+
+                    /* KORREKTUR: Sucht nach dem passenden schließenden Zeichen (quote_char) als int */
+                    char *end = strchr(app->exec, quote_char);
                     if (end) *end = '\0';
                 }
 
