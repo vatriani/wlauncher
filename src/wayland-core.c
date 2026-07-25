@@ -107,6 +107,11 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
                if (pid == 0) {
                    setsid();
 
+                  int devnull = open("/dev/null", O_WRONLY);
+                  dup2(devnull, STDOUT_FILENO);
+                  dup2(devnull, STDERR_FILENO);
+                  close(devnull);
+
                    /* KUGELSICHERER TOKENIZER: Zerlegt den Befehl bei Leerzeichen */
                    char *args[64]; /* Maximal 63 Argumente erlaubt */
                    int arg_count = 0;
@@ -211,16 +216,22 @@ void registry_handle_global(void *data, struct wl_registry *registry, uint32_t i
     register struct app_context *ctx = (struct app_context *)data;
 
     if (strncmp(interface, "wl_compositor", 13) == 0) {
-      ctx->compositor = wl_registry_bind(registry, id, &wl_compositor_interface, version);
+        /* WAYLAND VERSION HANDLING: Bindet die maximal unterstützte Version des Servers (bis max 4) */
+        uint32_t bind_ver = (version < 4) ? version : 4;
+        ctx->compositor = wl_registry_bind(registry, id, &wl_compositor_interface, bind_ver);
     } else if (strncmp(interface, "zwlr_layer_shell_v1", 19) == 0) {
-        ctx->layer_shell = wl_registry_bind(registry, id, &zwlr_layer_shell_v1_interface, version);
+        uint32_t bind_ver = (version < 4) ? version : 4;
+        ctx->layer_shell = wl_registry_bind(registry, id, &zwlr_layer_shell_v1_interface, bind_ver);
     } else if (strncmp(interface, "wl_shm", 6) == 0) {
-        ctx->shm = wl_registry_bind(registry, id, &wl_shm_interface, 1);
+        uint32_t bind_ver = (version < 1) ? version : 1;
+        ctx->shm = wl_registry_bind(registry, id, &wl_shm_interface, bind_ver);
     } else if (strncmp(interface, "wl_seat", 7) == 0) {
-        ctx->seat = wl_registry_bind(registry, id, &wl_seat_interface, 1);
+        uint32_t bind_ver = (version < 1) ? version : 1;
+        ctx->seat = wl_registry_bind(registry, id, &wl_seat_interface, bind_ver);
         wl_seat_add_listener(ctx->seat, &seat_listener, ctx);
     }
 }
+
 
 void registry_handle_global_remove(void *data, struct wl_registry *registry, uint32_t id) {
     (void)data; (void)registry; (void)id;
