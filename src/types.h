@@ -7,8 +7,23 @@
  *  \copyright  GNU Public License v3
  */
 
-#ifdef __TYPES_H__
-#define __TYPES_H__
+#ifdef TYPES_H
+#define TYPES_H
+
+#define _GNU_SOURCE
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <wayland-client.h>
+
+/* Die vom Scanner generierten Header */
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "xdg-shell-client-protocol.h"
 
 struct app_context {
     struct wl_display             *display;
