@@ -49,12 +49,12 @@ void draw_frame(struct app_context *ctx) {
     cairo_fill(cr);
 
     PangoLayout *layout = pango_cairo_create_layout(cr);
-    pango_layout_set_text(layout, " wlauncher >", -1);
+    pango_layout_set_text(layout, "wlauncher", -1);
     PangoFontDescription *font_desc = pango_font_description_from_string("DejaVu Sans Mono Bold 11");
     pango_layout_set_font_description(layout, font_desc);
 
     cairo_set_source_rgb(cr, ctx->bg_r, ctx->bg_g, ctx->bg_b);
-    cairo_move_to(cr, 5, 3);
+    cairo_move_to(cr, 10, 3);
     pango_cairo_show_layout(cr, layout);
 
     /* draw live keyboard input and results */
