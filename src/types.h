@@ -7,7 +7,7 @@
 
 #define MAX_APPS 512
 #define MAX_NAME_LENGTH 256
-#define MAX_MATCHED_APPS 7
+#define MAX_MATCHED_APPS 10
 
 
 

@@ -87,28 +87,96 @@ void scan_applications(struct app_context *ctx) {
 
 
 
+int get_fuzzy_score(const char *str, const char *search) {
+    if (!search || *search == '\0') return 0;
+
+    char *exact_match = strcasestr(str, search);
+    if (exact_match) return (int)(exact_match - str);
+
+    const char *s = search;
+    const char *p = str;
+    int score = 1000;
+
+    while (*s != '\0' && *p != '\0') {
+        char s_char = (*s >= 'A' && *s <= 'Z') ? *s + 32 : *s;
+        char p_char = (*p >= 'A' && *p <= 'Z') ? *p + 32 : *p;
+
+        if (s_char == p_char) ++s;
+        else score += 5;
+        ++p;
+    }
+
+    if (*s == '\0') return score;
+
+    return -1;
+}
+
+
+
+static const char *current_search_query = NULL;
+
+
+
+int compare_matched_apps(const void *a, const void *b) {
+  const struct app_info *appA = (const struct app_info *)a;
+  const struct app_info *appB = (const struct app_info *)b;
+
+  if (!current_search_query || *current_search_query == '\0') {
+      return strcasecmp(appA->name, appB->name);
+  }
+
+  int scoreA = get_fuzzy_score(appA->name, current_search_query);
+  int scoreB = get_fuzzy_score(appB->name, current_search_query);
+
+  if (scoreA == -1) {
+      int execScore = get_fuzzy_score(appA->exec, current_search_query);
+      scoreA = (execScore != -1) ? execScore + 5000 : -1;
+  }
+  if (scoreB == -1) {
+      int execScore = get_fuzzy_score(appB->exec, current_search_query);
+      scoreB = (execScore != -1) ? execScore + 5000 : -1;
+  }
+
+  if (scoreA != scoreB) {
+      return scoreA - scoreB;
+  }
+
+  return strcasecmp(appA->name, appB->name);
+}
+
+
+
 void find_best_matches(struct app_context *ctx, const char *search) {
     ctx->matched_count = 0;
     if (!search || search[0] == '\0') return;
 
-    for (register int iterator = 0; iterator < ctx->app_count; ++iterator) {
-        if (strcasestr(ctx->apps[iterator].name, search) != NULL ||
-                strcasestr(ctx->apps[iterator].exec, search) != NULL) {
+    current_search_query = search;
 
-            int idx = ctx->matched_count;
+    struct app_info temp_matches[MAX_APPS];
+    int temp_count = 0;
 
-            snprintf(ctx->matched_apps[idx].name,
-                    sizeof(ctx->matched_apps[idx].name),
-                    "%s", ctx->apps[iterator].name);
+    for (int iterator = 0; iterator < ctx->app_count; ++iterator) {
+        int name_score = get_fuzzy_score(ctx->apps[iterator].name, search);
+        int exec_score = get_fuzzy_score(ctx->apps[iterator].exec, search);
 
-            snprintf(ctx->matched_apps[idx].exec,
-                    sizeof(ctx->matched_apps[idx].exec),
-                    "%s", ctx->apps[iterator].exec);
+        if (name_score != -1 || exec_score != -1) {
+            snprintf(temp_matches[temp_count].name,
+                      sizeof(temp_matches[temp_count].name),
+                      "%s", ctx->apps[iterator].name);
 
-            ++ctx->matched_count;
-            if (ctx->matched_count >= MAX_MATCHED_APPS) break;
+            snprintf(temp_matches[temp_count].exec,
+                      sizeof(temp_matches[temp_count].exec),
+                      "%s", ctx->apps[iterator].exec);
+
+            ++temp_count;
+            if (temp_count >= MAX_APPS) break;
         }
     }
+
+    if (temp_count > 1) qsort(temp_matches, temp_count, sizeof(struct app_info), compare_matched_apps);
+
+    ctx->matched_count = (temp_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : temp_count;
+    for (int i = 0; i < ctx->matched_count; ++i) ctx->matched_apps[i] = temp_matches[i];
 }
 
 

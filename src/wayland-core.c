@@ -220,6 +220,8 @@ static const struct wl_seat_listener seat_listener = {
 void registry_handle_global(void *data, struct wl_registry *registry, uint32_t id, const char *interface, uint32_t version) {
     register struct app_context *ctx = (struct app_context *)data;
 
+    if (!ctx) return;
+
     if (strncmp(interface, "wl_compositor", 13) == 0) {
         uint32_t bind_ver = (version < 4) ? version : 4;
         ctx->compositor = wl_registry_bind(registry, id, &wl_compositor_interface, bind_ver);
