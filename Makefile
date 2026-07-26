@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -O2 -std=gnu11 -march=native -mtune=native -Wall -Wextra
-LIBS = $(shell pkg-config --cflags --libs wayland-client cairo pango pangocairo xkbcommon)
+CFLAGS = -O2 -fdata-sections -ffunction-sections -pedantic-errors -std=gnu11 -march=native -mtune=native -Wall -Wextra -fstack-protector-strong -fPIE
+LIBS = $(shell pkg-config --cflags --libs wayland-client cairo pango pangocairo xkbcommon) -Wl,--gc-sections,-z,relro,-z,now
 
 # Dynamische Pfade zu den Protokollen
 ifneq ($(shell pkg-config --exists wlr-protocols && echo yes),yes)
