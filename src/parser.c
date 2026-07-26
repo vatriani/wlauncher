@@ -7,17 +7,20 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <wayland-client.h> // Für wl_min Makro
+#include <wayland-client.h>
 #include "parser.h"
+#include "types.h"
+
+
 
 void scan_applications(struct app_context *ctx) {
     const char *dir_path = "/usr/share/applications";
-    DIR *dir = opendir(dir_path);
-    if (!dir) return;
-
     struct dirent *entry;
     char file_path[512];
     char line[512];
+
+    DIR *dir = opendir(dir_path);
+    if (!dir) return;
 
     ctx->app_count = 0;
 
@@ -33,6 +36,7 @@ void scan_applications(struct app_context *ctx) {
 
         while (fgets(line, sizeof(line), f)) {
             size_t line_len = strlen(line);
+
             if (line_len >= sizeof(line) - 1 && line[line_len - 1] != '\n') {
                 int ch;
                 while ((ch = fgetc(f)) != '\n' && ch != EOF);
@@ -69,35 +73,45 @@ void scan_applications(struct app_context *ctx) {
         }
         fclose(f);
 
-        /* .DESKTOP VALIDIERUNG: Nur im RAM speichern, wenn BEIDE Felder real gefüllt wurden! */
         if (has_name && has_exec && strlen(app->name) > 0 && strlen(app->exec) > 0) {
-            ctx->app_count++;
+            ++ctx->app_count;
         } else {
-            /* Falls ein Feld fehlte, nullen wir den Speicherbereich für den nächsten Eintrag */
             memset(app, 0, sizeof(struct app_info));
         }
     }
     closedir(dir);
+#ifdef DEBUG
     printf("wlauncher: %d valide Anwendungen erfolgreich im RAM indiziert.\n", ctx->app_count);
+#endif
 }
+
+
 
 void find_best_matches(struct app_context *ctx, const char *search) {
     ctx->matched_count = 0;
     if (!search || search[0] == '\0') return;
 
-    for (int i = 0; i < ctx->app_count; ++i) {
-        if (strcasestr(ctx->apps[i].name, search) != NULL ||
-            strcasestr(ctx->apps[i].exec, search) != NULL) {
+    for (register int iterator = 0; iterator < ctx->app_count; ++iterator) {
+        if (strcasestr(ctx->apps[iterator].name, search) != NULL ||
+                strcasestr(ctx->apps[iterator].exec, search) != NULL) {
 
             int idx = ctx->matched_count;
-            snprintf(ctx->matched_apps[idx].name, sizeof(ctx->matched_apps[idx].name), "%s", ctx->apps[i].name);
-            snprintf(ctx->matched_apps[idx].exec, sizeof(ctx->matched_apps[idx].exec), "%s", ctx->apps[i].exec);
 
-            ctx->matched_count++;
-            if (ctx->matched_count >= 5) break;
+            snprintf(ctx->matched_apps[idx].name,
+                    sizeof(ctx->matched_apps[idx].name),
+                    "%s", ctx->apps[iterator].name);
+
+            snprintf(ctx->matched_apps[idx].exec,
+                    sizeof(ctx->matched_apps[idx].exec),
+                    "%s", ctx->apps[iterator].exec);
+
+            ++ctx->matched_count;
+            if (ctx->matched_count >= MAX_MATCHED_APPS) break;
         }
     }
 }
+
+
 
 void fetch_hyprland_colors(struct app_context *ctx) {
     ctx->bg_r = 0.117; ctx->bg_g = 0.117; ctx->bg_b = 0.180;
@@ -129,7 +143,7 @@ void fetch_hyprland_colors(struct app_context *ctx) {
     if (len <= 0) return;
     buf[len] = '\0';
 
-    char *hex_start = strstr(buf, "\"str\": \"");
+    register char *hex_start = strstr(buf, "\"str\": \"");
     if (!hex_start) return;
     hex_start += 8;
 

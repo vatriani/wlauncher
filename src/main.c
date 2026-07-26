@@ -4,22 +4,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <signal.h> // NEU: Für Zombie-Prozess Handling
+#include <signal.h>
+#include <wayland-client.h>
 
 #include "types.h"
-#include <wayland-client.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
-
 #include "wayland-core.h"
 #include "window.h"
 #include "parser.h"
 
+
+
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
 
-    /* 1. ZOMBIE-SCHUTZ: Ignoriert das CHLD-Signal.
-       Der Kernel raeumt geforkte Prozesse (Steam, Kate) sofort atomar auf (0% PID-Pollution) */
+    /* 1. ZOMBIE-PROTECT:  */
     signal(SIGCHLD, SIG_IGN);
 
     struct app_context stack_ctx;
@@ -42,7 +42,9 @@ int main(int argc, char **argv) {
     wl_display_roundtrip(ctx->display);
 
     if (!ctx->compositor || !ctx->layer_shell || !ctx->shm) {
-        fprintf(stderr, "Fehler: Kritische Wayland-Schnittstellen fehlen.\n");
+#ifdef DEBGUG
+        fprintf(stderr, "Err: crittical Wayland handler missing.\n");
+#endif
         wl_display_disconnect(ctx->display);
         return 1;
     }
@@ -50,7 +52,7 @@ int main(int argc, char **argv) {
     ctx->surface = wl_compositor_create_surface(ctx->compositor);
     ctx->layer_surface = zwlr_layer_shell_v1_get_layer_surface(ctx->layer_shell, ctx->surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "wlauncher");
 
-    /* LAYER SHELL ANCHOR: Saubere, explizite Bitmasken-Zuweisung */
+    /* LAYER SHELL ANCHOR:*/
     uint32_t anchors = ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
     zwlr_layer_surface_v1_set_anchor(ctx->layer_surface, anchors);
     zwlr_layer_surface_v1_set_size(ctx->layer_surface, 0, ctx->height);
@@ -61,28 +63,29 @@ int main(int argc, char **argv) {
     wl_surface_commit(ctx->surface);
     wl_display_flush(ctx->display);
 
-    printf("wlauncher: System stabil und zombie-geschuetzt. Warte auf Eingabe...\n");
-
+#ifdef DEBUG
+    printf("wlauncher: Waiting for input...\n");
+#endif
     while (ctx->running && wl_display_dispatch(ctx->display) != -1) {}
-
-    printf("wlauncher: Beende Programm und raeume Speicher auf.\n");
-
-    /* 2. REGISTRY CLEANUP FIX: Erst die gebundenen Interfaces loeschen, dann die Core-Schnittstellen */
+#ifdef DEBUG
+    printf("wlauncher: close program and cleanup memory.\n");
+#endif
+    /* 2. REGISTRY CLEANUP FIX: */
     if (ctx->keyboard)      wl_keyboard_destroy(ctx->keyboard);
     if (ctx->seat)          wl_seat_destroy(ctx->seat);
     if (ctx->buffer)        wl_buffer_destroy(ctx->buffer);
     if (ctx->layer_surface) zwlr_layer_surface_v1_destroy(ctx->layer_surface);
     if (ctx->surface)       wl_surface_destroy(ctx->surface);
 
-    /* Globale Destruktoren aufrufen (Schließt alle offenen Server-Schnittstellen leckfrei) */
+    /* calls global destructors */
     if (ctx->layer_shell)   zwlr_layer_shell_v1_destroy(ctx->layer_shell);
     if (ctx->compositor)    wl_compositor_destroy(ctx->compositor);
     if (ctx->shm)           wl_shm_destroy(ctx->shm);
     if (ctx->registry)      wl_registry_destroy(ctx->registry);
 
-    if (ctx->xkb_state)   xkb_state_unref(ctx->xkb_state);
-    if (ctx->xkb_keymap)  xkb_keymap_unref(ctx->xkb_keymap);
-    if (ctx->xkb_context) xkb_context_unref(ctx->xkb_context);
+    if (ctx->xkb_state)     xkb_state_unref(ctx->xkb_state);
+    if (ctx->xkb_keymap)    xkb_keymap_unref(ctx->xkb_keymap);
+    if (ctx->xkb_context)   xkb_context_unref(ctx->xkb_context);
 
     wl_display_flush(ctx->display);
     wl_display_disconnect(ctx->display);

@@ -1,35 +1,31 @@
 #include "window.h"
 #include "buffer.h"
 
+
+
 static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *layer_surface, uint32_t serial, uint32_t width, uint32_t height) {
     register struct app_context *ctx = (struct app_context *)data;
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
 
-    /* HIER PASSIERT DIE WAYLAND-MAGIE: */
-    /* Hyprland übergibt in 'width' die exakte Pixelbreite des aktiven Monitors */
-    if (width > 0) {
-        ctx->width = width;
-    }
-    if (height > 0) {
-        ctx->height = height;
-    }
+    if (width > 0) ctx->width = width;
+    if (height > 0) ctx->height = height;
 
-    /* Zeichnet den Frame erst, wenn wir eine gültige Breite vom Server haben */
     if (ctx->width > 0 && !ctx->configured) {
         ctx->configured = 1;
         draw_frame(ctx);
     }
-    /* Sicherheitsnetz: Wenn sich die Fenstergröße im Betrieb ändert (z.B. Monitor-Wechsel) */
-    else if (ctx->width > 0 && ctx->configured) {
-        draw_frame(ctx);
-    }
+    else if (ctx->width > 0 && ctx->configured) draw_frame(ctx);
 }
+
+
 
 static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *layer_surface) {
     register struct app_context *ctx = (struct app_context *)data;
-    (void)layer_surface; // Eliminiert die Warnung im Compiler restlos!
+    (void)layer_surface;
     ctx->running = 0;
 }
+
+
 
 const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
     .configure = layer_surface_configure,

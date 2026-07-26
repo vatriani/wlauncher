@@ -4,8 +4,6 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
-
-/* Die Grafik-Header einbinden */
 #include <cairo.h>
 #include <pango/pangocairo.h>
 
@@ -30,6 +28,7 @@ void draw_frame(struct app_context *ctx) {
     if (fd < 0) return;
 
     uint32_t *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
     if (data == MAP_FAILED) {
         close(fd);
         return;
@@ -40,11 +39,11 @@ void draw_frame(struct app_context *ctx) {
     );
     cairo_t *cr = cairo_create(cairo_surface);
 
-    /* Hintergrund färben */
+    /* background color */
     cairo_set_source_rgb(cr, ctx->bg_r, ctx->bg_g, ctx->bg_b);
     cairo_paint(cr);
 
-    /* Dmenu-Prompt zeichnen */
+    /* dmenu-prompt drawing */
     cairo_set_source_rgb(cr, ctx->accent_r, ctx->accent_g, ctx->accent_b);
     cairo_rectangle(cr, 0, 0, 100, ctx->height);
     cairo_fill(cr);
@@ -58,7 +57,7 @@ void draw_frame(struct app_context *ctx) {
     cairo_move_to(cr, 5, 3);
     pango_cairo_show_layout(cr, layout);
 
-    /* Live-Tastatur-Eingabe und Vorschläge zeichnen */
+    /* draw live keyboard input and results */
     if (ctx->input_length > 0) {
         find_best_matches(ctx, ctx->input_buffer);
 
@@ -75,7 +74,7 @@ void draw_frame(struct app_context *ctx) {
         pango_layout_get_pixel_size(layout, &input_width, &input_height);
         int current_offset = 115 + input_width + 20;
 
-        for (int i = 0; i < ctx->matched_count; ++i) {
+        for (register int i = 0; i < ctx->matched_count; ++i) {
             char display_text[256];
             snprintf(display_text, sizeof(display_text), " %s ", ctx->matched_apps[i].name);
             pango_layout_set_text(layout, display_text, -1);
@@ -97,13 +96,11 @@ void draw_frame(struct app_context *ctx) {
             current_offset += item_width + 15;
         }
     }
-
     pango_font_description_free(font_desc);
     g_object_unref(layout);
     cairo_destroy(cr);
     cairo_surface_destroy(cairo_surface);
 
-    /* KORREKTUR: Alten Buffer auf dem Server atomar vernichten, bevor wir neu instanziieren (RAM-Leak Fix) */
     if (ctx->buffer) {
         wl_buffer_destroy(ctx->buffer);
     }

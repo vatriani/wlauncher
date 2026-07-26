@@ -1,12 +1,18 @@
 #include "wayland-core.h"
 #include "buffer.h"
 #include "parser.h"
-#include <linux/input-event-codes.h>
-#include <wayland-client.h>
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
-/* 1. KEYMAP-EVENT: Hyprland schickt uns beim Start das exakt konfigurierte System-Layout */
+#include <string.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <linux/input-event-codes.h>
+#include <wayland-client.h>
+
+
+
 static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard, uint32_t format, int32_t fd, uint32_t size) {
     register struct app_context *ctx = (struct app_context *)data;
     (void)keyboard;
@@ -16,14 +22,12 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard, uin
         return;
     }
 
-    /* Das vom System gesendete Layout in den XKB-Speicher mappen */
     char *map_str = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
     if (map_str == MAP_FAILED) {
         close(fd);
         return;
     }
 
-    /* Alte Keymap loeschen falls vorhanden, um Leaks zu vermeiden */
     if (ctx->xkb_keymap) xkb_keymap_unref(ctx->xkb_keymap);
     if (ctx->xkb_state)  xkb_state_unref(ctx->xkb_state);
 
@@ -35,17 +39,27 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard, uin
     ctx->xkb_state = xkb_state_new(ctx->xkb_keymap);
 }
 
+
+
 static void keyboard_handle_enter(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface, struct wl_array *keys) {
     (void)data; (void)keyboard; (void)serial; (void)surface; (void)keys;
+#ifdef DEBUG
     printf("wlauncher: Tastatur-Fokus ERHALTEN.\n");
+#endif
 }
+
+
 
 static void keyboard_handle_leave(void *data, struct wl_keyboard *keyboard, uint32_t serial, struct wl_surface *surface) {
     (void)data; (void)keyboard; (void)serial; (void)surface;
+#ifdef DEBUG
     printf("wlauncher: Tastatur-Fokus VERLOREN.\n");
+#endif
 }
 
-/* 2. MODIFIERS-EVENT: Aktualisiert den Shift/AltGr-Status im Speicher */
+
+
+/* MODIFIERS-EVENT */
 static void keyboard_handle_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group) {
     register struct app_context *ctx = (struct app_context *)data;
     (void)keyboard; (void)serial;
@@ -54,17 +68,20 @@ static void keyboard_handle_modifiers(void *data, struct wl_keyboard *keyboard, 
     }
 }
 
+
+
 static void keyboard_handle_repeat_info(void *data, struct wl_keyboard *keyboard, int32_t rate, int32_t delay) {
     (void)data; (void)keyboard; (void)rate; (void)delay;
 }
 
-/* 3. KEY-EVENT: JEDER TASTENDRUCK WIRD HIER REINLÄNDISCH ÜBERSETZT */
+
+
+/* KEY-EVENT */
 static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state) {
     register struct app_context *ctx = (struct app_context *)data;
     (void)serial; (void)time; (void)keyboard;
 
     if (state == 1) {
-        /* FIX: Die Deklaration MUSS hier stehen, damit alle nachfolgenden Blöcke darauf zugreifen können! */
         uint32_t xkb_keycode = key + 8;
 
         if (key == KEY_ESC) {
@@ -72,100 +89,80 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
             return;
         }
 
-        /* NAVIGATION: Pfeiltaste RECHTS springt zum nächsten Vorschlag */
         if (key == KEY_RIGHT && ctx->matched_count > 0) {
             ctx->matched_index = (ctx->matched_index + 1) % ctx->matched_count;
-            if (ctx->configured && ctx->width > 0) {
-                draw_frame(ctx);
-            }
+            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
             return;
         }
 
-        /* NAVIGATION: Pfeiltaste LINKS springt zum vorherigen Vorschlag */
         if (key == KEY_LEFT && ctx->matched_count > 0) {
             ctx->matched_index = (ctx->matched_index - 1 + ctx->matched_count) % ctx->matched_count;
-            if (ctx->configured && ctx->width > 0) {
-                draw_frame(ctx);
-            }
+            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
             return;
         }
 
-        /* AUSFÜHREN BEI ENTER (Kugelsicher für Befehle mit Argumenten) */
-       if (key == KEY_ENTER) {
-           char *exec_cmd = NULL;
+        if (key == KEY_ENTER) {
+            char *exec_cmd = NULL;
 
-           if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
-               exec_cmd = ctx->matched_apps[ctx->matched_index].exec;
-               printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
-                      ctx->matched_index, ctx->matched_apps[ctx->matched_index].name, exec_cmd);
-           } else {
-               exec_cmd = ctx->input_buffer;
-           }
+            if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
+                exec_cmd = ctx->matched_apps[ctx->matched_index].exec;
+#ifdef DEBUG
+                printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
+                       ctx->matched_index, ctx->matched_apps[ctx->matched_index].name, exec_cmd);
+#endif
+            } else {
+                exec_cmd = ctx->input_buffer;
+            }
 
-           if (exec_cmd && exec_cmd[0] != '\0') {
-               pid_t pid = fork();
-               if (pid == 0) {
-                   setsid();
+            if (exec_cmd && exec_cmd[0] != '\0') {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    setsid();
 
-                  int devnull = open("/dev/null", O_WRONLY);
-                  dup2(devnull, STDOUT_FILENO);
-                  dup2(devnull, STDERR_FILENO);
-                  close(devnull);
+                    int devnull = open("/dev/null", O_WRONLY);
+                    dup2(devnull, STDOUT_FILENO);
+                    dup2(devnull, STDERR_FILENO);
+                    close(devnull);
 
-                   /* KUGELSICHERER TOKENIZER: Zerlegt den Befehl bei Leerzeichen */
-                   char *args[64]; /* Maximal 63 Argumente erlaubt */
-                   int arg_count = 0;
+                    char *args[64];
+                    int arg_count = 0;
+                    char cmd_copy[256];
+                    strncpy(cmd_copy, exec_cmd, sizeof(cmd_copy) - 1);
+                    cmd_copy[sizeof(cmd_copy) - 1] = '\0';
 
-                   /* Wir arbeiten auf einer lokalen Kopie, um den RAM-Cache nicht zu zerstoeren */
-                   char cmd_copy[256];
-                   strncpy(cmd_copy, exec_cmd, sizeof(cmd_copy) - 1);
-                   cmd_copy[sizeof(cmd_copy) - 1] = '\0';
+                    register char *token = cmd_copy;
+                    while (*token && arg_count < 63) {
+                        while (*token == ' ') ++token;
+                        if (*token == '\0') break;
+                        args[++arg_count] = token;
+                        while (*token && *token != ' ') ++token;
 
-                   char *token = cmd_copy;
-                   while (*token && arg_count < 63) {
-                       /* Führende Leerzeichen überspringen */
-                       while (*token == ' ') token++;
-                       if (*token == '\0') break;
+                        if (*token == ' ') {
+                            *token = '\0';
+                            ++token;
+                        }
+                    }
+                    args[arg_count] = NULL;
 
-                       /* Dieses Wort als Argument registrieren */
-                       args[arg_count++] = token;
-
-                       /* Bis zum nächsten Leerzeichen laufen */
-                       while (*token && *token != ' ') token++;
-
-                       /* Wort mit Null-Byte beenden und Pointer weiterschieben */
-                       if (*token == ' ') {
-                           *token = '\0';
-                           token++;
-                       }
-                   }
-                   args[arg_count] = NULL; /* Array muss laut POSIX mit NULL enden */
-
-                   /* Wenn wir mindestens ein Argument extrahiert haben, feuern wir execvp */
-                   if (arg_count > 0) {
-                       execvp(args[0], args);
-                   }
-
-                   /* Falls execvp fehlschlaegt (z.B. Befehl existiert nicht mehr) */
+                    if (arg_count > 0) execvp(args[0], args);
                    _exit(1);
-               }
-           }
-           ctx->running = 0;
-           return;
-       }
+                }
+            }
+            ctx->running = 0;
+            return;
+        }
 
-        /* BACKSPACE: Zeichen löschen */
         if (key == KEY_BACKSPACE && ctx->input_length > 0) {
             ctx->input_buffer[--ctx->input_length] = '\0';
             ctx->matched_index = 0;
-            if (ctx->configured && ctx->width > 0) {
-                draw_frame(ctx);
-            }
+
+            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
+#ifdef DEBUG
             printf("Eingabe: %s\n", ctx->input_buffer);
+#endif
             return;
         }
 
-        /* DIE UNIVERSELLE MAGIE */
         char utf8_buf[8] = {0};
         if (ctx->xkb_state && xkb_state_key_get_utf8(ctx->xkb_state, xkb_keycode, utf8_buf, sizeof(utf8_buf)) > 0) {
             char c = utf8_buf[0];
@@ -173,17 +170,17 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
             if (c >= 32 && ctx->input_length < 255) {
                 ctx->input_buffer[ctx->input_length++] = c;
                 ctx->input_buffer[ctx->input_length] = '\0';
-
                 ctx->matched_index = 0;
-                printf("Eingabe: %s\n", ctx->input_buffer);
 
-                if (ctx->configured && ctx->width > 0) {
-                    draw_frame(ctx);
-                }
+#ifdef DEBUG
+                printf("Eingabe: %s\n", ctx->input_buffer);
+#endif
+                if (ctx->configured && ctx->width > 0) draw_frame(ctx);
             }
         }
     }
 }
+
 
 
 static const struct wl_keyboard_listener keyboard_listener = {
@@ -195,6 +192,8 @@ static const struct wl_keyboard_listener keyboard_listener = {
     .repeat_info = keyboard_handle_repeat_info,
 };
 
+
+
 static void seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t capabilities) {
     register struct app_context *ctx = (struct app_context *)data;
     if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
@@ -203,20 +202,25 @@ static void seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t 
     }
 }
 
+
+
 static void seat_handle_name(void *data, struct wl_seat *seat, const char *name) {
     (void)data; (void)seat; (void)name;
 }
+
+
 
 static const struct wl_seat_listener seat_listener = {
     .capabilities = seat_handle_capabilities,
     .name = seat_handle_name,
 };
 
+
+
 void registry_handle_global(void *data, struct wl_registry *registry, uint32_t id, const char *interface, uint32_t version) {
     register struct app_context *ctx = (struct app_context *)data;
 
     if (strncmp(interface, "wl_compositor", 13) == 0) {
-        /* WAYLAND VERSION HANDLING: Bindet die maximal unterstützte Version des Servers (bis max 4) */
         uint32_t bind_ver = (version < 4) ? version : 4;
         ctx->compositor = wl_registry_bind(registry, id, &wl_compositor_interface, bind_ver);
     } else if (strncmp(interface, "zwlr_layer_shell_v1", 19) == 0) {
@@ -233,9 +237,12 @@ void registry_handle_global(void *data, struct wl_registry *registry, uint32_t i
 }
 
 
+
 void registry_handle_global_remove(void *data, struct wl_registry *registry, uint32_t id) {
     (void)data; (void)registry; (void)id;
 }
+
+
 
 const struct wl_registry_listener registry_listener = {
     .global = registry_handle_global,
