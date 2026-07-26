@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <wayland-client.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <errno.h>
 
 #include "types.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -19,7 +22,25 @@
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
 
-    /* 1. ZOMBIE-PROTECT:  */
+    int instance_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (instance_sock >= 0) {
+        struct sockaddr_un addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sun_family = AF_UNIX;
+
+        strncpy(addr.sun_path + 1, "wlauncher_single_instance_lock", sizeof(addr.sun_path) - 2);
+
+        if (bind(instance_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            if (errno == EADDRINUSE) {
+#ifdef DEBUG
+                fprintf(stderr, "wlauncher: Eine Instanz läuft bereits. Beende lautlos.\n");
+#endif
+                close(instance_sock);
+                return 0;
+            }
+        }
+    }
+
     signal(SIGCHLD, SIG_IGN);
 
     struct app_context stack_ctx;
