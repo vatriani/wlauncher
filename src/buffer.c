@@ -1,7 +1,9 @@
 #define _GNU_SOURCE
 
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/mman.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <wayland-client.h>
 #include <cairo.h>
@@ -9,6 +11,9 @@
 
 #include "buffer.h"
 #include "parser.h"
+#include "types.h"
+
+
 
 static int allocate_shm_file(size_t size) {
     int fd = memfd_create("wlauncher-shared-buffer", MFD_CLOEXEC);
@@ -20,7 +25,29 @@ static int allocate_shm_file(size_t size) {
     return fd;
 }
 
+
+
+static void buffer_release(void *data, struct wl_buffer *wl_buffer) {
+    struct app_context *ctx = (struct app_context *)data;
+
+    wl_buffer_destroy(wl_buffer);
+
+    if (ctx && ctx->buffer == wl_buffer) {
+        ctx->buffer = NULL;
+    }
+}
+
+
+
+static const struct wl_buffer_listener buffer_listener = {
+    .release = buffer_release,
+};
+
+
+
 void draw_frame(struct app_context *ctx) {
+    if (ctx->width <= 0 || ctx->height <= 0) return;
+
     int stride = ctx->width * 4;
     int size = stride * ctx->height;
 
@@ -28,7 +55,6 @@ void draw_frame(struct app_context *ctx) {
     if (fd < 0) return;
 
     uint32_t *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-
     if (data == MAP_FAILED) {
         close(fd);
         return;
@@ -39,11 +65,9 @@ void draw_frame(struct app_context *ctx) {
     );
     cairo_t *cr = cairo_create(cairo_surface);
 
-    /* background color */
     cairo_set_source_rgb(cr, ctx->bg_r, ctx->bg_g, ctx->bg_b);
     cairo_paint(cr);
 
-    /* dmenu-prompt drawing */
     cairo_set_source_rgb(cr, ctx->accent_r, ctx->accent_g, ctx->accent_b);
     cairo_rectangle(cr, 0, 0, 100, ctx->height);
     cairo_fill(cr);
@@ -56,62 +80,64 @@ void draw_frame(struct app_context *ctx) {
     cairo_set_source_rgb(cr, ctx->bg_r, ctx->bg_g, ctx->bg_b);
     cairo_move_to(cr, 10, 3);
     pango_cairo_show_layout(cr, layout);
+    pango_font_description_free(font_desc);
 
-    /* draw live keyboard input and results */
+    int current_offset = 115;
+
+    font_desc = pango_font_description_from_string("DejaVu Sans Mono 11");
+    pango_layout_set_font_description(layout, font_desc);
+
     if (ctx->input_length > 0) {
-        find_best_matches(ctx, ctx->input_buffer);
-
         pango_layout_set_text(layout, ctx->input_buffer, -1);
-        pango_font_description_free(font_desc);
-        font_desc = pango_font_description_from_string("DejaVu Sans Mono 11");
-        pango_layout_set_font_description(layout, font_desc);
-
-        cairo_set_source_rgb(cr, 0.917, 0.933, 0.956);
-        cairo_move_to(cr, 115, 3);
+        cairo_set_source_rgb(cr, 0.917, 0.933, 0.956); // Helles Text-Weiß
+        cairo_move_to(cr, current_offset, 3);
         pango_cairo_show_layout(cr, layout);
 
         int input_width, input_height;
         pango_layout_get_pixel_size(layout, &input_width, &input_height);
-        int current_offset = 115 + input_width + 20;
-
-        for (register int i = 0; i < ctx->matched_count; ++i) {
-            char display_text[256];
-            snprintf(display_text, sizeof(display_text), " %s ", ctx->matched_apps[i].name);
-            pango_layout_set_text(layout, display_text, -1);
-
-            int item_width, item_height;
-            pango_layout_get_pixel_size(layout, &item_width, &item_height);
-
-            if (i == ctx->matched_index) {
-                cairo_set_source_rgb(cr, ctx->accent_r, ctx->accent_g, ctx->accent_b);
-                cairo_rectangle(cr, current_offset, 0, item_width, ctx->height);
-                cairo_fill(cr);
-                cairo_set_source_rgb(cr, ctx->bg_r, ctx->bg_g, ctx->bg_b);
-            } else {
-                cairo_set_source_rgb(cr, 0.545, 0.556, 0.639);
-            }
-
-            cairo_move_to(cr, current_offset, 3);
-            pango_cairo_show_layout(cr, layout);
-            current_offset += item_width + 15;
-        }
+        current_offset += input_width + 20;
     }
+
+    for (register int i = 0; i < ctx->matched_count; ++i) {
+        char display_text[260]; // REPARATUR: Größe von 256 auf 260 erhöht, um Warnung zu löschen
+        snprintf(display_text, sizeof(display_text), " %s ", ctx->matched_apps[i]->name);
+        pango_layout_set_text(layout, display_text, -1);
+
+
+        int item_width, item_height;
+        pango_layout_get_pixel_size(layout, &item_width, &item_height);
+
+        if (current_offset + item_width > ctx->width) break;
+
+        if (i == ctx->matched_index) {
+            cairo_set_source_rgb(cr, ctx->accent_r, ctx->accent_g, ctx->accent_b);
+            cairo_rectangle(cr, current_offset, 0, item_width, ctx->height);
+            cairo_fill(cr);
+            cairo_set_source_rgb(cr, ctx->bg_r, ctx->bg_g, ctx->bg_b);
+        } else {
+            cairo_set_source_rgb(cr, 0.75, 0.75, 0.78);
+        }
+
+        cairo_move_to(cr, current_offset, 3);
+        pango_cairo_show_layout(cr, layout);
+        current_offset += item_width + 15;
+    }
+
     pango_font_description_free(font_desc);
     g_object_unref(layout);
     cairo_destroy(cr);
     cairo_surface_destroy(cairo_surface);
 
-    if (ctx->buffer) {
-        wl_buffer_destroy(ctx->buffer);
-    }
-
     struct wl_shm_pool *pool = wl_shm_create_pool(ctx->shm, fd, size);
-    ctx->buffer = wl_shm_pool_create_buffer(pool, 0, ctx->width, ctx->height, stride, WL_SHM_FORMAT_XRGB8888);
+    struct wl_buffer *next_buffer = wl_shm_pool_create_buffer(pool, 0, ctx->width, ctx->height, stride, WL_SHM_FORMAT_XRGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
 
+    wl_buffer_add_listener(next_buffer, &buffer_listener, ctx);
+    ctx->buffer = next_buffer;
+
     wl_surface_attach(ctx->surface, ctx->buffer, 0, 0);
-    wl_surface_damage(ctx->surface, 0, 0, ctx->width, ctx->height);
+    wl_surface_damage_buffer(ctx->surface, 0, 0, ctx->width, ctx->height);
     wl_surface_commit(ctx->surface);
 
     munmap(data, size);

@@ -40,7 +40,7 @@ struct app_context {
     struct app_info                apps[MAX_APPS];
     int                            app_count;
 
-    struct app_info                matched_apps[MAX_MATCHED_APPS];
+    const struct app_info         *matched_apps[MAX_MATCHED_APPS];
     int                            matched_count;
     int                            matched_index;
 

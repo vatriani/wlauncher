@@ -102,50 +102,38 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
         }
 
         if (key == KEY_ENTER) {
-            char *exec_cmd = NULL;
+           const char *exec_cmd = NULL;
 
-            if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
-                exec_cmd = ctx->matched_apps[ctx->matched_index].exec;
+           if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
+               exec_cmd = ctx->matched_apps[ctx->matched_index]->exec;
 #ifdef DEBUG
-                printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
-                       ctx->matched_index, ctx->matched_apps[ctx->matched_index].name, exec_cmd);
+               printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
+                      ctx->matched_index, ctx->matched_apps[ctx->matched_index]->name, exec_cmd);
 #endif
-            } else {
-                exec_cmd = ctx->input_buffer;
-            }
+           } else {
+               exec_cmd = ctx->input_buffer;
+           }
 
             if (exec_cmd && exec_cmd[0] != '\0') {
                 pid_t pid = fork();
                 if (pid == 0) {
                     setsid();
 
+                    for (int i = 3; i < 1024; ++i) close(i);
+
                     int devnull = open("/dev/null", O_WRONLY);
-                    dup2(devnull, STDOUT_FILENO);
-                    dup2(devnull, STDERR_FILENO);
-                    close(devnull);
-
-                    char *args[64];
-                    int arg_count = 0;
-                    char cmd_copy[256];
-                    strncpy(cmd_copy, exec_cmd, sizeof(cmd_copy) - 1);
-                    cmd_copy[sizeof(cmd_copy) - 1] = '\0';
-
-                    register char *token = cmd_copy;
-                    while (*token && arg_count < 63) {
-                        while (*token == ' ') ++token;
-                        if (*token == '\0') break;
-                        args[++arg_count] = token;
-                        while (*token && *token != ' ') ++token;
-
-                        if (*token == ' ') {
-                            *token = '\0';
-                            ++token;
-                        }
+                    if (devnull >= 0) {
+                        dup2(devnull, STDOUT_FILENO);
+                        dup2(devnull, STDERR_FILENO);
+                        close(devnull);
                     }
-                    args[arg_count] = NULL;
 
-                    if (arg_count > 0) execvp(args[0], args);
-                   _exit(1);
+                    execl("/bin/sh", "sh", "-c", exec_cmd, (char *)NULL);
+                    _exit(1);
+                } else if (pid < 0) {
+#ifdef DEBUG
+                    perror("wlauncher: fork fehlgeschlagen");
+#endif
                 }
             }
             ctx->running = 0;
@@ -156,10 +144,12 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
             ctx->input_buffer[--ctx->input_length] = '\0';
             ctx->matched_index = 0;
 
-            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
+            find_best_matches(ctx, ctx->input_buffer);
+
 #ifdef DEBUG
-            printf("Eingabe: %s\n", ctx->input_buffer);
+            printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer, ctx->matched_count);
 #endif
+            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
             return;
         }
 
@@ -172,15 +162,16 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
                 ctx->input_buffer[ctx->input_length] = '\0';
                 ctx->matched_index = 0;
 
+                find_best_matches(ctx, ctx->input_buffer);
+
 #ifdef DEBUG
-                printf("Eingabe: %s\n", ctx->input_buffer);
+                printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer, ctx->matched_count);
 #endif
                 if (ctx->configured && ctx->width > 0) draw_frame(ctx);
             }
         }
     }
 }
-
 
 
 static const struct wl_keyboard_listener keyboard_listener = {

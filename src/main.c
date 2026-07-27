@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
         if (bind(instance_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
             if (errno == EADDRINUSE) {
 #ifdef DEBUG
-                fprintf(stderr, "wlauncher: Eine Instanz läuft bereits. Beende lautlos.\n");
+                fprintf(stderr, "wlauncher: is already running\n");
 #endif
                 close(instance_sock);
                 return 0;
@@ -51,6 +51,7 @@ int main(int argc, char **argv) {
     ctx->height = 24;
 
     scan_applications(ctx);
+    find_best_matches(ctx, "");
     fetch_hyprland_colors(ctx);
 
     ctx->xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
@@ -73,7 +74,6 @@ int main(int argc, char **argv) {
     ctx->surface = wl_compositor_create_surface(ctx->compositor);
     ctx->layer_surface = zwlr_layer_shell_v1_get_layer_surface(ctx->layer_shell, ctx->surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "wlauncher");
 
-    /* LAYER SHELL ANCHOR:*/
     uint32_t anchors = ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
     zwlr_layer_surface_v1_set_anchor(ctx->layer_surface, anchors);
     zwlr_layer_surface_v1_set_size(ctx->layer_surface, 0, ctx->height);
@@ -91,24 +91,24 @@ int main(int argc, char **argv) {
 #ifdef DEBUG
     printf("wlauncher: close program and cleanup memory.\n");
 #endif
-    /* 2. REGISTRY CLEANUP FIX: */
+
+
+    if (ctx->surface) {
+        wl_surface_attach(ctx->surface, NULL, 0, 0);
+        wl_surface_commit(ctx->surface);
+    }
+    wl_display_flush(ctx->display);
+
+    if (ctx->display)       wl_display_roundtrip(ctx->display);
     if (ctx->keyboard)      wl_keyboard_destroy(ctx->keyboard);
     if (ctx->seat)          wl_seat_destroy(ctx->seat);
-    if (ctx->buffer)        wl_buffer_destroy(ctx->buffer);
     if (ctx->layer_surface) zwlr_layer_surface_v1_destroy(ctx->layer_surface);
     if (ctx->surface)       wl_surface_destroy(ctx->surface);
-
-    /* calls global destructors */
-    if (ctx->layer_shell)   zwlr_layer_shell_v1_destroy(ctx->layer_shell);
-    if (ctx->compositor)    wl_compositor_destroy(ctx->compositor);
-    if (ctx->shm)           wl_shm_destroy(ctx->shm);
-    if (ctx->registry)      wl_registry_destroy(ctx->registry);
-
+    if (ctx->buffer)        wl_buffer_destroy(ctx->buffer);
     if (ctx->xkb_state)     xkb_state_unref(ctx->xkb_state);
     if (ctx->xkb_keymap)    xkb_keymap_unref(ctx->xkb_keymap);
     if (ctx->xkb_context)   xkb_context_unref(ctx->xkb_context);
+    if (ctx->display)       wl_display_disconnect(ctx->display);
 
-    wl_display_flush(ctx->display);
-    wl_display_disconnect(ctx->display);
     return 0;
 }
