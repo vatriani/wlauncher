@@ -142,7 +142,12 @@ static int configParse(config_file *cfg, FILE **file) {
 
         conf_tup *tup = malloc(sizeof(conf_tup));
         if (!tup || !(tup->name = strdup(name)) || !(tup->value = strdup(value))) {
-            if (tup) free(tup);
+            if (tup) {
+                free(tup->name);
+                free(tup->value);
+                free(tup);
+            }
+            free(line);
             return -1;
         }
 
@@ -286,7 +291,7 @@ unsigned int optHandling(int argc, char **argv, struct app_context *ctx) {
                 showHelp(argv[0]);
                 return 1;
             case 'v':
-                showVersion(argv[0], "b0.1");
+                showVersion(argv[0], "v0.0.3");
                 return 1;
             case 'f':
                 strncpy(ctx->render.font, optarg, MAX_APP_NAME_LENGTH - 1);

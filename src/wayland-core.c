@@ -138,9 +138,7 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
                     execl("/bin/sh", "sh", "-c", exec_cmd, (char *)NULL);
                     _exit(1);
                 } else if (pid < 0) {
-#ifdef DEBUG
-                    perror("wlauncher: fork fehlgeschlagen");
-#endif
+                    perror("wlauncher: fork error");
                 }
             }
             ctx->running = 0;
@@ -154,7 +152,7 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
             find_best_matches(ctx, ctx->input_buffer);
 
 #ifdef DEBUG
-            printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer,
+            printf("input: %s (matches: %d)\n", ctx->input_buffer,
                     ctx->matched_count);
 #endif
             if (ctx->configured && ctx->render.width > 0) draw_frame(ctx);
@@ -175,7 +173,7 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
                 find_best_matches(ctx, ctx->input_buffer);
 
 #ifdef DEBUG
-                printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer,
+                printf("input: %s (matches: %d)\n", ctx->input_buffer,
                         ctx->matched_count);
 #endif
                 if (ctx->configured && ctx->render.width > 0) draw_frame(ctx);
@@ -183,6 +181,7 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
         }
     }
 }
+
 
 
 static const struct wl_keyboard_listener keyboard_listener = {
@@ -318,15 +317,19 @@ static void layer_surface_configure(void *data,
 
     if (width > 0) ctx->render.width = width;
     if (height > 0) ctx->render.height = height;
-/*
-    if (ctx->render.width > 0 && !ctx->configured) {
-        ctx->configured = 1;
-        draw_frame(ctx);
-    }
-    else */
+
+#ifdef DEBUG
     fprintf(stderr, "configure: %ux%u ready=%d\n", width, height, ctx->configured);
-    if (ctx->render.width > 0 && ctx->configured) draw_frame(ctx);
+#endif
+    if (ctx->render.width > 0 && ctx->configured) {
+        ctx->render.buffer_busy = 0;
+        if (ctx->render.needs_redraw) {
+            ctx->render.needs_redraw = 0;
+            draw_frame(ctx);
+        }
+    }
 }
+
 
 
 

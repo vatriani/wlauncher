@@ -23,7 +23,7 @@
 #define DEF_FG_COL_G           0.9    ///< fallback fg color green
 #define DEF_FG_COL_B           0.9    ///< fallback fg color blue
 #define DEF_PADDING              5    ///< fallback padding for drawing
-#define DEF_BAR_HEIGHT          16    ///< fallback bar height
+#define DEF_BAR_HEIGHT          24    ///< fallback bar height
 #define DEF_FONT  "DejaVu Sans 12"    ///< fallbacl font
 
 

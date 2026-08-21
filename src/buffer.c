@@ -34,7 +34,7 @@ static void buffer_release(void *data, struct wl_buffer *wl_buffer) {
     struct app_context *ctx = data;
     if (!ctx) return;
     if (ctx->render.buffer == wl_buffer) {
-        ctx->render.buffer_busy = 0;  // wiederverwendbar
+        ctx->render.buffer_busy = 0;
     }
 }
 
@@ -71,7 +71,7 @@ int setupCairo(struct app_context *ctx) {
         CAIRO_FORMAT_RGB24,
         ctx->render.width,
         ctx->render.height,
-        ctx->render.fhm_stride   // <- wichtig
+        ctx->render.fhm_stride
     );
     ctx->render.cr = cairo_create(ctx->render.cairo_surface);
 
@@ -98,13 +98,49 @@ int setupCairo(struct app_context *ctx) {
 }
 
 void cairo_cleanup(struct app_context *ctx) {
-    if (ctx->render.pango_font_desc) pango_font_description_free(ctx->render.pango_font_desc);
-    if (ctx->render.pango_layout) g_object_unref(ctx->render.pango_layout);
-    if (ctx->render.buffer) wl_buffer_destroy(ctx->render.buffer);
-    if (ctx->render.fhm_data) munmap(ctx->render.fhm_data, ctx->render.fhm_size);
-    if (ctx->render.fhm_fd >= 0) close(ctx->render.fhm_fd);
-    cairo_destroy(ctx->render.cr);
-    cairo_surface_destroy(ctx->render.cairo_surface);
+    if (!ctx) return;
+
+    if (ctx->render.pango_font_desc) {
+        pango_font_description_free(ctx->render.pango_font_desc);
+        ctx->render.pango_font_desc = NULL;
+    }
+
+    if (ctx->render.pango_layout) {
+        g_object_unref(ctx->render.pango_layout);
+        ctx->render.pango_layout = NULL;
+    }
+
+    if (ctx->render.cr) {
+        cairo_destroy(ctx->render.cr);
+        ctx->render.cr = NULL;
+    }
+
+    if (ctx->render.cairo_surface) {
+        cairo_surface_destroy(ctx->render.cairo_surface);
+        ctx->render.cairo_surface = NULL;
+    }
+
+    if (ctx->render.buffer) {
+        wl_buffer_destroy(ctx->render.buffer);
+        ctx->render.buffer = NULL;
+    }
+
+    if (ctx->render.pool) {
+        wl_shm_pool_destroy(ctx->render.pool);
+        ctx->render.pool = NULL;
+    }
+
+    if (ctx->render.fhm_data) {
+        munmap(ctx->render.fhm_data, ctx->render.fhm_size);
+        ctx->render.fhm_data = NULL;
+    }
+
+    if (ctx->render.fhm_fd >= 0) {
+        close(ctx->render.fhm_fd);
+        ctx->render.fhm_fd = -1;
+    }
+
+    ctx->render.buffer_busy = 0;
 }
 
 
@@ -118,7 +154,7 @@ static void set_source_rgb(cairo_t *cr, color *tmp_color) {
 void draw_frame(struct app_context *ctx) {
     if (ctx->render.width <= 0 || ctx->render.height <= 0 || !ctx->configured) return;
     if (!ctx->render.buffer) return;
-    if (ctx->render.buffer_busy) return; // warten bis release-event kam
+    if (ctx->render.buffer_busy) return;
 
     set_source_rgb(ctx->render.cr, &ctx->render.bg_color);
     cairo_paint(ctx->render.cr);
@@ -169,14 +205,17 @@ void draw_frame(struct app_context *ctx) {
         pango_cairo_show_layout(ctx->render.cr, ctx->render.pango_layout);
         current_offset += item_width + 15;
     }
+
     cairo_surface_flush(ctx->render.cairo_surface);
     wl_surface_attach(ctx->render.surface, ctx->render.buffer, 0, 0);
     wl_surface_damage_buffer(ctx->render.surface, 0, 0, ctx->render.width, ctx->render.height);
     wl_surface_commit(ctx->render.surface);
     ctx->render.buffer_busy = 1;
+#ifdef DEBUG
     fprintf(stderr, "draw_frame: %dx%d buffer=%p surface=%p\n",
         ctx->render.width, ctx->render.height,
         (void*)ctx->render.buffer, (void*)ctx->render.surface);
+#endif
 }
 
 color rgb_to_double(char *tmp) {

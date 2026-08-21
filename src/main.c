@@ -44,15 +44,17 @@ int main(int argc, char **argv) {
     register struct app_context *ctx = &stack_ctx;
     memset(ctx, 0, sizeof(struct app_context));
 
+    atexit_ctx_ptr = ctx;
+    atexit(atexit_wrapper);
+
 #ifndef DEBUG
     if (checkIfRunning()) return 0;
 #endif
     zombieProtect();
+    config_fill_defaults(ctx);
     if (optHandling(argc, argv, ctx)) return -1;
-    if (configLoad(&ctx->config)) {
+    if (configLoad(&ctx->config))
         printf("[wlauncher] falling back to default values\n");
-        config_fill_defaults(ctx);
-    }
     else {
         setConfigValues(ctx);
         configFree(&ctx->config);
@@ -88,7 +90,6 @@ int main(int argc, char **argv) {
     printf("wlauncher: close program and cleanup memory.\n");
 #endif
 
-
     cleanup(ctx);
 
     return 0;
@@ -107,7 +108,7 @@ static int setup_ctx(struct app_context *ctx) {
     wl_display_roundtrip(ctx->render.display);
 
     if (!ctx->render.compositor || !ctx->render.layer_shell || !ctx->render.wl_shm) {
-#ifdef DEBGUG
+#ifdef DEBUG
         fprintf(stderr, "Err: crittical Wayland handler missing.\n");
 #endif
         wl_display_disconnect(ctx->render.display);
@@ -138,22 +139,89 @@ static int setup_ctx(struct app_context *ctx) {
 }
 
 static void cleanup(struct app_context *ctx) {
+    if (!ctx) return;
+
+    /* 1) Cairo/SHM zuerst */
+    cairo_cleanup(ctx);
+
+    /* 2) Surface sauber ablösen */
     if (ctx->render.surface) {
         wl_surface_attach(ctx->render.surface, NULL, 0, 0);
         wl_surface_commit(ctx->render.surface);
     }
-    wl_display_flush(ctx->render.display);
 
-    if (ctx->render.display)       wl_display_roundtrip(ctx->render.display);
-    if (ctx->render.keyboard)      wl_keyboard_destroy(ctx->render.keyboard);
-    if (ctx->render.seat)          wl_seat_destroy(ctx->render.seat);
-    if (ctx->render.layer_surface) zwlr_layer_surface_v1_destroy(ctx->render.layer_surface);
-    if (ctx->render.surface)       wl_surface_destroy(ctx->render.surface);
-    if (ctx->render.buffer)        wl_buffer_destroy(ctx->render.buffer);
-    if (ctx->render.xkb_state)     xkb_state_unref(ctx->render.xkb_state);
-    if (ctx->render.xkb_keymap)    xkb_keymap_unref(ctx->render.xkb_keymap);
-    if (ctx->render.xkb_context)   xkb_context_unref(ctx->render.xkb_context);
-    if (ctx->render.display)       wl_display_disconnect(ctx->render.display);
+    if (ctx->render.display) {
+        wl_display_flush(ctx->render.display);
+        wl_display_roundtrip(ctx->render.display);
+    }
+
+    /* 3) Wayland input/shell objects */
+    if (ctx->render.keyboard) {
+        wl_keyboard_destroy(ctx->render.keyboard);
+        ctx->render.keyboard = NULL;
+    }
+
+    if (ctx->render.seat) {
+        wl_seat_destroy(ctx->render.seat);
+        ctx->render.seat = NULL;
+    }
+
+    if (ctx->render.layer_surface) {
+        zwlr_layer_surface_v1_destroy(ctx->render.layer_surface);
+        ctx->render.layer_surface = NULL;
+    }
+
+    if (ctx->render.surface) {
+        wl_surface_destroy(ctx->render.surface);
+        ctx->render.surface = NULL;
+    }
+
+    if (ctx->render.registry) {
+        wl_registry_destroy(ctx->render.registry);
+        ctx->render.registry = NULL;
+    }
+
+    if (ctx->render.compositor) {
+        wl_compositor_destroy(ctx->render.compositor);
+        ctx->render.compositor = NULL;
+    }
+
+    if (ctx->render.wl_shm) {
+        wl_shm_destroy(ctx->render.wl_shm);
+        ctx->render.wl_shm = NULL;
+    }
+
+    if (ctx->render.layer_shell) {
+        zwlr_layer_shell_v1_destroy(ctx->render.layer_shell);
+        ctx->render.layer_shell = NULL;
+    }
+
+    /* 4) XKB */
+    if (ctx->render.xkb_state) {
+        xkb_state_unref(ctx->render.xkb_state);
+        ctx->render.xkb_state = NULL;
+    }
+
+    if (ctx->render.xkb_keymap) {
+        xkb_keymap_unref(ctx->render.xkb_keymap);
+        ctx->render.xkb_keymap = NULL;
+    }
+
+    if (ctx->render.xkb_context) {
+        xkb_context_unref(ctx->render.xkb_context);
+        ctx->render.xkb_context = NULL;
+    }
+
+    /* 5) display zuletzt */
+    if (ctx->render.display) {
+        wl_display_disconnect(ctx->render.display);
+        ctx->render.display = NULL;
+    }
+
+    if (ctx->render.font) {
+        free(ctx->render.font);
+        ctx->render.font = NULL;
+    }
 }
 
 
