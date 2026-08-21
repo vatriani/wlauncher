@@ -108,7 +108,7 @@ void scan_applications(struct app_context *ctx) {
 
             if (has_name && has_exec && strlen(temp_name) > 0 && strlen(temp_exec) > 0) {
                 if (!is_duplicate_app(ctx, temp_name, temp_exec)) {
-                    struct app_info *app = &ctx->apps[ctx->app_count];
+                    app_info *app = &ctx->apps[ctx->app_count];
 
                     snprintf(app->name, sizeof(app->name), "%s", temp_name);
                     snprintf(app->exec, sizeof(app->exec), "%s", temp_exec);
@@ -177,8 +177,8 @@ int get_fuzzy_score(const char *str, const char *search) {
 
 
 int compare_cached_entries(const void *a, const void *b) {
-    const struct sorted_entry *entryA = (const struct sorted_entry *)a;
-    const struct sorted_entry *entryB = (const struct sorted_entry *)b;
+    const sorted_entry *entryA = (const sorted_entry *)a;
+    const sorted_entry *entryB = (const sorted_entry *)b;
 
     if (entryA->score != entryB->score) return entryA->score - entryB->score;
 
@@ -192,7 +192,7 @@ int compare_cached_entries(const void *a, const void *b) {
 void find_best_matches(struct app_context *ctx, const char *search) {
     ctx->matched_count = 0;
 
-    struct sorted_entry temp_entries[MAX_APPS];
+    sorted_entry temp_entries[MAX_APPS];
     int temp_count = 0;
 
     if (!search || search[0] == '\0') {
@@ -204,7 +204,7 @@ void find_best_matches(struct app_context *ctx, const char *search) {
         }
 
         if (ctx->app_count > 1) {
-            qsort(temp_entries, ctx->app_count, sizeof(struct sorted_entry), compare_cached_entries);
+            qsort(temp_entries, ctx->app_count, sizeof(sorted_entry), compare_cached_entries);
         }
 
         ctx->matched_count = (ctx->app_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : ctx->app_count;
@@ -233,7 +233,7 @@ void find_best_matches(struct app_context *ctx, const char *search) {
     }
 
     if (temp_count > 1 && search && search[0] != '\0')
-        qsort(temp_entries, temp_count, sizeof(struct sorted_entry), compare_cached_entries);
+        qsort(temp_entries, temp_count, sizeof(sorted_entry), compare_cached_entries);
 
     ctx->matched_count = (temp_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : temp_count;
       for (int i = 0; i < ctx->matched_count; ++i)

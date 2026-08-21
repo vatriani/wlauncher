@@ -28,7 +28,8 @@
 
 
 
-struct app_info {
+typedef struct app_info_t app_info;
+struct app_info_t {
     char name[MAX_NAME_LENGTH];
     char exec[MAX_NAME_LENGTH];
 };
@@ -43,10 +44,14 @@ struct color_t {
 };
 
 
-struct sorted_entry {
-    const struct app_info *app;
+
+typedef struct sorted_entry_t sorted_entry;
+struct sorted_entry_t {
+    const app_info *app;
     int score;
 };
+
+
 
 typedef struct render_context_t render_context;
 struct render_context_t {
@@ -88,15 +93,15 @@ struct render_context_t {
 
 struct app_context {
     render_context                 render;
+    config_file                    config;
+
     char                           input_buffer[MAX_NAME_LENGTH];
     int                            input_length;
-    struct app_info                apps[MAX_APPS];
+    app_info                       apps[MAX_APPS];
     int                            app_count;
-    const struct app_info         *matched_apps[MAX_MATCHED_APPS];
+    const app_info                *matched_apps[MAX_MATCHED_APPS];
     int                            matched_count;
     int                            matched_index;
-
-    config_file                    config;
 
     int                            running;
     int                            configured;

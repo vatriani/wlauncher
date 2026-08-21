@@ -264,6 +264,51 @@ const struct wl_registry_listener registry_listener = {
     .global_remove = registry_handle_global_remove,
 };
 
+static void output_handle_geometry(void *data, struct wl_output *wl_output,
+        int32_t x, int32_t y, int32_t physical_width, int32_t physical_height,
+        int32_t subpixel, const char *make, const char *model,
+        int32_t transform) {
+    (void)data; (void)wl_output; (void)x; (void)y; (void)physical_width;
+    (void)physical_height; (void)subpixel; (void)make; (void)model;
+    (void)transform;
+}
+
+
+
+static void output_handle_mode(void *data, struct wl_output *wl_output,
+        uint32_t flags, int32_t width, int32_t height, int32_t refresh) {
+    (void)data; (void)wl_output; (void) height; (void)refresh;
+
+    struct app_context *ctx = data;
+    if (flags & WL_OUTPUT_MODE_CURRENT) {
+        if (ctx->render.width <= 0) {
+            ctx->render.width = width;
+        }
+    }
+}
+
+
+
+static void output_handle_done(void *data, struct wl_output *wl_output) {
+    (void)data; (void)wl_output;
+}
+
+
+
+static void output_handle_scale(void *data, struct wl_output *wl_output,
+        int32_t factor) {
+    (void)data; (void)wl_output; (void)factor;
+}
+
+
+
+static const struct wl_output_listener output_listener = {
+    .geometry = output_handle_geometry,
+    .mode = output_handle_mode,
+    .done = output_handle_done,
+    .scale = output_handle_scale,
+};
+
 
 
 static void layer_surface_configure(void *data,
