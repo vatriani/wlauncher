@@ -18,6 +18,6 @@ build() {
 
 package() {
 	cd "$startdir"
-	install -Dm777 wlauncher "$pkgdir/usr/bin/wlauncher"
+	install -Dm755 wlauncher "$pkgdir/usr/bin/wlauncher"
 	install -Dm644 config.cfg "$pkgdir/usr/share/doc/wlauncher/config.cfg.example"
 }
