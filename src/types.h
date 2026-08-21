@@ -46,7 +46,9 @@ struct app_info_t {
     char name[MAX_NAME_LENGTH];
     char exec[MAX_NAME_LENGTH];
     double usage_score;
+    int seen;
 };
+
 
 
 

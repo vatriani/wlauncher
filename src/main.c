@@ -64,7 +64,7 @@ int main(int argc, char **argv) {
 
     if (!ctx->force_rebuild_cache && cache_load_if_valid(ctx) == 1) {
     } else {
-        scan_applications(ctx);
+        scan_applications(ctx, SCAN_ALL);
         cache_store(ctx);
     }
     find_best_matches(ctx, "");

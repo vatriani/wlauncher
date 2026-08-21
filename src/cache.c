@@ -1,4 +1,5 @@
 #include "cache.h"
+#include "parser.h"
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -11,7 +12,7 @@
 #include <errno.h>
 
 #define CACHE_MAGIC "WLAC"
-#define CACHE_VERSION 2
+#define CACHE_VERSION 3
 #define CACHE_DIR_COUNT 3
 
 
@@ -152,12 +153,14 @@ int cache_load_if_valid(struct app_context *ctx) {
     }
 
     cache_dir_fp current_fp[CACHE_DIR_COUNT];
+    int fingerprints_equal = 1;
+
     collect_current_fingerprints(current_fp);
 
     for (int i = 0; i < CACHE_DIR_COUNT; ++i) {
         if (!fp_equal(&file_fp[i], &current_fp[i])) {
-            fclose(f);
-            return 0;
+            fingerprints_equal = 0;
+            break;
         }
     }
 
@@ -183,6 +186,7 @@ int cache_load_if_valid(struct app_context *ctx) {
         app->name[MAX_NAME_LENGTH - 1] = '\0';
         app->exec[MAX_NAME_LENGTH - 1] = '\0';
         app->usage_score = rec.usage_score;
+        app->seen = 1;
 
         if (ctx->apps.pfVectorAdd(&ctx->apps, app) != 0) {
             free(app);
@@ -193,6 +197,12 @@ int cache_load_if_valid(struct app_context *ctx) {
     }
 
     fclose(f);
+
+    if (!fingerprints_equal) {
+        scan_applications(ctx, SCAN_APPEND);
+        cache_store(ctx);
+    }
+
     return 1;
 }
 

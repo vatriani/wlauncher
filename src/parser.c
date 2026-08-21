@@ -12,33 +12,173 @@
 
 
 
-static int is_duplicate_app(const struct app_context *ctx, const char *name, const char *exec) {
+static app_info *find_existing_app(const struct app_context *ctx, const char *name, const char *exec) {
     int total = ctx->apps.pfVectorTotal((vector *)&ctx->apps);
     for (int i = 0; i < total; ++i) {
         app_info *app = (app_info *)ctx->apps.pfVectorGet((vector *)&ctx->apps, i);
         if (!app) continue;
         if (strcasecmp(app->name, name) == 0 || strcasecmp(app->exec, exec) == 0)
-            return 1;
+            return app;
     }
-    return 0;
+    return NULL;
 }
 
+static void clear_apps_vector_local(struct app_context *ctx) {
+    int total = ctx->apps.pfVectorTotal(&ctx->apps);
+    for (int i = 0; i < total; ++i) {
+        app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+        free(app);
+    }
+    ctx->apps.pfVectorFree(&ctx->apps);
+    vector_init(&ctx->apps);
+}
 
-void scan_applications(struct app_context *ctx) {
+static void mark_all_apps_unseen(struct app_context *ctx) {
+    int total = ctx->apps.pfVectorTotal(&ctx->apps);
+    for (int i = 0; i < total; ++i) {
+        app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+        if (!app) continue;
+        app->seen = 0;
+    }
+}
+
+static void sweep_unseen_apps(struct app_context *ctx) {
+    vector new_apps;
+    vector_init(&new_apps);
+
+    int total = ctx->apps.pfVectorTotal(&ctx->apps);
+    int rebuild_ok = 1;
+
+    for (int i = 0; i < total; ++i) {
+        app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+        if (!app) continue;
+
+        if (app->seen) {
+            if (new_apps.pfVectorAdd(&new_apps, app) != 0) {
+                rebuild_ok = 0;
+                break;
+            }
+        }
+    }
+
+    if (!rebuild_ok) {
+        new_apps.pfVectorFree(&new_apps);
+        return;
+    }
+
+    for (int i = 0; i < total; ++i) {
+        app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+        if (!app) continue;
+
+        if (!app->seen) {
+            free(app);
+        }
+    }
+
+    ctx->apps.pfVectorFree(&ctx->apps);
+    ctx->apps = new_apps;
+}
+
+static void upsert_scanned_app(struct app_context *ctx, const char *name, const char *exec) {
+    app_info *existing = find_existing_app(ctx, name, exec);
+    if (existing) {
+        existing->seen = 1;
+        return;
+    }
+
+    app_info *app = calloc(1, sizeof(app_info));
+    if (!app) return;
+
+    snprintf(app->name, sizeof(app->name), "%s", name);
+    snprintf(app->exec, sizeof(app->exec), "%s", exec);
+    app->usage_score = SCORE_APPSTART_BONI;
+    app->seen = 1;
+
+    if (ctx->apps.pfVectorAdd(&ctx->apps, app) != 0) {
+        free(app);
+    }
+}
+
+static int parse_desktop_file(const char *file_path, char *out_name, size_t out_name_sz,
+                              char *out_exec, size_t out_exec_sz) {
+    FILE *f = fopen(file_path, "r");
+    if (!f) return 0;
+
+    char line[MAX_APPS];
+    int has_name = 0;
+    int has_exec = 0;
+
+    out_name[0] = '\0';
+    out_exec[0] = '\0';
+
+    while (fgets(line, sizeof(line), f)) {
+        size_t line_len = strlen(line);
+
+        if (line_len >= sizeof(line) - 1 && line[line_len - 1] != '\n') {
+            int ch;
+            while ((ch = fgetc(f)) != '\n' && ch != EOF);
+            continue;
+        }
+
+        if (!has_name && strncmp(line, "Name=", 5) == 0) {
+            char *newline = strchr(line, '\n');
+            if (newline) *newline = '\0';
+
+            snprintf(out_name, out_name_sz, "%.255s", line + 5);
+            has_name = 1;
+        }
+
+        if (!has_exec && strncmp(line, "Exec=", 5) == 0) {
+            char *newline = strchr(line, '\n');
+            if (newline) *newline = '\0';
+
+            snprintf(out_exec, out_exec_sz, "%.255s", line + 5);
+
+            char *p = out_exec;
+            while ((p = strchr(p, '%')) != NULL) {
+                if (p[1] == 'u' || p[1] == 'U' || p[1] == 'f' || p[1] == 'F' ||
+                    p[1] == 'i' || p[1] == 'c' || p[1] == 'k') {
+                    p[0] = ' ';
+                    p[1] = ' ';
+                }
+                p++;
+            }
+
+            if (out_exec[0] == '"' || out_exec[0] == '\'') {
+                char quote_char = out_exec[0];
+                memmove(out_exec, out_exec + 1, strlen(out_exec));
+                char *end = strchr(out_exec, quote_char);
+                if (end) *end = '\0';
+            }
+            has_exec = 1;
+        }
+    }
+
+    fclose(f);
+
+    return has_name && has_exec && strlen(out_name) > 0 && strlen(out_exec) > 0;
+}
+
+void scan_applications(struct app_context *ctx, scan append_only) {
     const char *base_paths[] = {
-        "/.local/share/applications",   // user-path
-        "/usr/share/applications",      // system-path
-        "/usr/local/share/applications" // local Admin-path
+        "/.local/share/applications",
+        "/usr/share/applications",
+        "/usr/local/share/applications"
     };
     int path_count = sizeof(base_paths) / sizeof(base_paths[0]);
 
     struct dirent *entry;
-
-    char resolved_path[512];
-    char file_path[1024];
-    char line[512];
-
+    char resolved_path[MAX_APPS];
+    char file_path[MAX_PATH];
+    char temp_name[MAX_NAME_LENGTH];
+    char temp_exec[MAX_NAME_LENGTH];
     char *home_dir = getenv("HOME");
+
+    if (append_only == SCAN_ALL) {
+        clear_apps_vector_local(ctx);
+    } else {
+        mark_all_apps_unseen(ctx);
+    }
 
     for (int p_idx = 0; p_idx < path_count; ++p_idx) {
         if (p_idx == 0) {
@@ -55,81 +195,23 @@ void scan_applications(struct app_context *ctx) {
             if (strstr(entry->d_name, ".desktop") == NULL) continue;
 
             snprintf(file_path, sizeof(file_path), "%s/%s", resolved_path, entry->d_name);
-            FILE *f = fopen(file_path, "r");
-            if (!f) continue;
 
-            char temp_name[256] = {0};
-            char temp_exec[256] = {0};
-            int has_name = 0, has_exec = 0;
-
-            while (fgets(line, sizeof(line), f)) {
-                size_t line_len = strlen(line);
-
-                if (line_len >= sizeof(line) - 1 && line[line_len - 1] != '\n') {
-                    int ch;
-                    while ((ch = fgetc(f)) != '\n' && ch != EOF);
-                    continue;
-                }
-
-                if (!has_name && strncmp(line, "Name=", 5) == 0) {
-                    char *newline = strchr(line, '\n');
-                    if (newline) *newline = '\0';
-
-                    snprintf(temp_name, sizeof(temp_name), "%.255s", line + 5);
-                    has_name = 1;
-                }
-
-                if (!has_exec && strncmp(line, "Exec=", 5) == 0) {
-                    char *newline = strchr(line, '\n');
-                    if (newline) *newline = '\0';
-
-                    snprintf(temp_exec, sizeof(temp_exec), "%.255s", line + 5);
-
-                    char *p = temp_exec;
-                    while ((p = strchr(p, '%')) != NULL) {
-                        if (p[1] == 'u' || p[1] == 'U' || p[1] == 'f' || p[1] == 'F' ||
-                            p[1] == 'i' || p[1] == 'c' || p[1] == 'k') {
-                            p[0] = ' ';
-                            p[1] = ' ';
-                        }
-                        p++;
-                    }
-
-                    if (temp_exec[0] == '"' || temp_exec[0] == '\'') {
-                        char quote_char = temp_exec[0];
-                        memmove(temp_exec, temp_exec + 1, strlen(temp_exec));
-                        char *end = strchr(temp_exec, quote_char);
-                        if (end) *end = '\0';
-                    }
-                    has_exec = 1;
-                }
-            }
-
-            if (has_name && has_exec && strlen(temp_name) > 0 && strlen(temp_exec) > 0) {
-                if (!is_duplicate_app(ctx, temp_name, temp_exec)) {
-                    app_info *app = calloc(1, sizeof(app_info));
-                    if (!app) {
-                        fclose(f);
-                        closedir(dir);
-                        return;
-                    }
-
-                    snprintf(app->name, sizeof(app->name), "%s", temp_name);
-                    snprintf(app->exec, sizeof(app->exec), "%s", temp_exec);
-                    app->usage_score = SCORE_APPSTART_BONI;
-
-                    if (ctx->apps.pfVectorAdd(&ctx->apps, app) != 0) {
-                        free(app);
-                    }
-                }
+            if (parse_desktop_file(file_path, temp_name, sizeof(temp_name),
+                                   temp_exec, sizeof(temp_exec))) {
+                upsert_scanned_app(ctx, temp_name, temp_exec);
             }
         }
+
         closedir(dir);
     }
 
+    if (append_only) {
+        sweep_unseen_apps(ctx);
+    }
+
 #ifdef DEBUG
-printf("wlauncher: %d valid apps (from all common XDG-paths) extracted.\n",
-       ctx->apps.pfVectorTotal(&ctx->apps));
+    printf("wlauncher: %d valid apps (from all common XDG-paths) extracted.\n",
+           ctx->apps.pfVectorTotal(&ctx->apps));
 #endif
 }
 
@@ -139,7 +221,7 @@ int get_fuzzy_score(const char *str, const char *search) {
     if (!search || *search == '\0' || !str || *str == '\0') return -1;
 
     char *exact_match = strcasestr(str, search);
-    if (exact_match) return (int)(exact_match - str); // 0 = best
+    if (exact_match) return (int)(exact_match - str);
 
     const char *s = search;
     const char *p = str;
@@ -259,7 +341,6 @@ void find_best_matches(struct app_context *ctx, const char *search) {
         if (name_score != -1 || exec_score != -1) {
             int final_score;
 
-            // Name has priority over Exec
             if (name_score != -1 && exec_score != -1)
                 final_score = (name_score < exec_score) ? name_score : exec_score;
             else if (name_score != -1)
@@ -267,7 +348,6 @@ void find_best_matches(struct app_context *ctx, const char *search) {
             else
                 final_score = exec_score;
 
-            // usage should improve rank => reduce score
             final_score -= (int)(app->usage_score * SCORE_APPSTART_WEIGHT);
             if (final_score < 0) final_score = 0;
             temp_entries[temp_count].app = app;
