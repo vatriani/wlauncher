@@ -15,12 +15,15 @@
 
 
 static int is_duplicate_app(const struct app_context *ctx, const char *name, const char *exec) {
-    for (register int i = 0; i < ctx->app_count; ++i)
-        if (strcasecmp(ctx->apps[i].name, name) == 0 || strcasecmp(ctx->apps[i].exec, exec) == 0)
+    int total = ctx->apps.pfVectorTotal((vector *)&ctx->apps);
+    for (int i = 0; i < total; ++i) {
+        app_info *app = (app_info *)ctx->apps.pfVectorGet((vector *)&ctx->apps, i);
+        if (!app) continue;
+        if (strcasecmp(app->name, name) == 0 || strcasecmp(app->exec, exec) == 0)
             return 1;
+    }
     return 0;
 }
-
 
 
 void scan_applications(struct app_context *ctx) {
@@ -37,7 +40,6 @@ void scan_applications(struct app_context *ctx) {
     char file_path[1024];
     char line[512];
 
-    ctx->app_count = 0;
     char *home_dir = getenv("HOME");
 
     for (int p_idx = 0; p_idx < path_count; ++p_idx) {
@@ -51,7 +53,7 @@ void scan_applications(struct app_context *ctx) {
         DIR *dir = opendir(resolved_path);
         if (!dir) continue;
 
-        while ((entry = readdir(dir)) != NULL && ctx->app_count < MAX_APPS) {
+        while ((entry = readdir(dir)) != NULL) {
             if (strstr(entry->d_name, ".desktop") == NULL) continue;
 
             snprintf(file_path, sizeof(file_path), "%s/%s", resolved_path, entry->d_name);
@@ -104,16 +106,22 @@ void scan_applications(struct app_context *ctx) {
                     has_exec = 1;
                 }
             }
-            fclose(f);
 
             if (has_name && has_exec && strlen(temp_name) > 0 && strlen(temp_exec) > 0) {
                 if (!is_duplicate_app(ctx, temp_name, temp_exec)) {
-                    app_info *app = &ctx->apps[ctx->app_count];
+                    app_info *app = calloc(1, sizeof(app_info));
+                    if (!app) {
+                        fclose(f);
+                        closedir(dir);
+                        return;
+                    }
 
                     snprintf(app->name, sizeof(app->name), "%s", temp_name);
                     snprintf(app->exec, sizeof(app->exec), "%s", temp_exec);
 
-                    ++ctx->app_count;
+                    if (ctx->apps.pfVectorAdd(&ctx->apps, app) != 0) {
+                        free(app);
+                    }
                 }
             }
         }
@@ -121,7 +129,8 @@ void scan_applications(struct app_context *ctx) {
     }
 
 #ifdef DEBUG
-    printf("wlauncher: %d valide Anwendungen (XDG-übergreifend) im RAM indiziert.\n", ctx->app_count);
+printf("wlauncher: %d valid apps (from all common XDG-paths) extracted.\n",
+       ctx->apps.pfVectorTotal(&ctx->apps));
 #endif
 }
 
@@ -190,33 +199,41 @@ int compare_cached_entries(const void *a, const void *b) {
 
 
 void find_best_matches(struct app_context *ctx, const char *search) {
-    ctx->matched_count = 0;
-
-    sorted_entry temp_entries[MAX_APPS];
+    int app_count = ctx->apps.pfVectorTotal(&ctx->apps);
     int temp_count = 0;
 
+    sorted_entry *temp_entries = calloc(app_count ? app_count : 1, sizeof(sorted_entry));
+    if (!temp_entries) {
+        ctx->matched_count = 0;
+        return;
+    }
+
     if (!search || search[0] == '\0') {
-        ctx->matched_count = (ctx->app_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : ctx->app_count;
-
-        for (int i = 0; i < ctx->app_count; ++i) {
-            temp_entries[i].app = &ctx->apps[i];
-            temp_entries[i].score = 0;
+        for (int i = 0; i < app_count; ++i) {
+            app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+            if (!app) continue;
+            temp_entries[temp_count].app = app;
+            temp_entries[temp_count].score = 0;
+            ++temp_count;
         }
 
-        if (ctx->app_count > 1) {
-            qsort(temp_entries, ctx->app_count, sizeof(sorted_entry), compare_cached_entries);
-        }
+        if (temp_count > 1)
+            qsort(temp_entries, temp_count, sizeof(sorted_entry), compare_cached_entries);
 
-        ctx->matched_count = (ctx->app_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : ctx->app_count;
-    for (int i = 0; i < ctx->matched_count; ++i) {
-        ctx->matched_apps[i] = temp_entries[i].app;
-    }
-    return;
+        ctx->matched_count = (temp_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : temp_count;
+        for (int i = 0; i < ctx->matched_count; ++i)
+            ctx->matched_apps[i] = temp_entries[i].app;
+
+        free(temp_entries);
+        return;
     }
 
-    for (int i = 0; i < ctx->app_count; ++i) {
-        int name_score = get_fuzzy_score(ctx->apps[i].name, search);
-        int exec_score = get_fuzzy_score(ctx->apps[i].exec, search);
+    for (int i = 0; i < app_count; ++i) {
+        app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+        if (!app) continue;
+
+        int name_score = get_fuzzy_score(app->name, search);
+        int exec_score = get_fuzzy_score(app->exec, search);
 
         if (name_score != -1 || exec_score != -1) {
             int final_score = 100000;
@@ -224,19 +241,18 @@ void find_best_matches(struct app_context *ctx, const char *search) {
             if (name_score != -1) final_score = name_score;
             else if (exec_score != -1) final_score = exec_score + 5000;
 
-            temp_entries[temp_count].app = &ctx->apps[i];
+            temp_entries[temp_count].app = app;
             temp_entries[temp_count].score = final_score;
-            temp_count++;
-
-            if (temp_count >= MAX_APPS) break;
+            ++temp_count;
         }
     }
 
-    if (temp_count > 1 && search && search[0] != '\0')
+    if (temp_count > 1)
         qsort(temp_entries, temp_count, sizeof(sorted_entry), compare_cached_entries);
 
     ctx->matched_count = (temp_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : temp_count;
-      for (int i = 0; i < ctx->matched_count; ++i)
-          ctx->matched_apps[i] = temp_entries[i].app;
+    for (int i = 0; i < ctx->matched_count; ++i)
+        ctx->matched_apps[i] = temp_entries[i].app;
 
+    free(temp_entries);
 }

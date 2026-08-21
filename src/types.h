@@ -99,8 +99,8 @@ struct app_context {
 
     char                           input_buffer[MAX_NAME_LENGTH];
     int                            input_length;
-    app_info                       apps[MAX_APPS];
-    int                            app_count;
+    vector                         apps;
+    int                            force_rebuild_cache;
     const app_info                *matched_apps[MAX_MATCHED_APPS];
     int                            matched_count;
     int                            matched_index;

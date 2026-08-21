@@ -5,6 +5,7 @@
 #include "wayland-core.h"
 #include "parser.h"
 #include "buffer.h"
+#include "cache.h"
 
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
@@ -44,12 +45,15 @@ int main(int argc, char **argv) {
     register struct app_context *ctx = &stack_ctx;
     memset(ctx, 0, sizeof(struct app_context));
 
+    vector_init(&ctx->apps);
+
     atexit_ctx_ptr = ctx;
     atexit(atexit_wrapper);
 
 #ifndef DEBUG
     if (checkIfRunning()) return 0;
 #endif
+    ctx->force_rebuild_cache = 0;
     zombieProtect();
     config_fill_defaults(ctx);
     if (optHandling(argc, argv, ctx)) return -1;
@@ -60,8 +64,13 @@ int main(int argc, char **argv) {
         configFree(&ctx->config);
     }
 
-    scan_applications(ctx);
+    if (!ctx->force_rebuild_cache && cache_load_if_valid(ctx) == 1) {
+    } else {
+        scan_applications(ctx);
+        cache_store(ctx);
+    }
     find_best_matches(ctx, "");
+
     if (setup_ctx(ctx) != 0) return -1;
 
     /* Warten bis initiales configure verarbeitet wurde */
@@ -137,6 +146,22 @@ static int setup_ctx(struct app_context *ctx) {
     ctx->running = 1;
     return 0;
 }
+
+
+
+static void free_apps_vector(struct app_context *ctx) {
+    if (!ctx) return;
+    if (!ctx->apps.pfVectorTotal || !ctx->apps.pfVectorGet || !ctx->apps.pfVectorFree) return;
+
+    int total = ctx->apps.pfVectorTotal(&ctx->apps);
+    for (int i = 0; i < total; ++i) {
+        app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+        free(app);
+    }
+    ctx->apps.pfVectorFree(&ctx->apps);
+}
+
+
 
 static void cleanup(struct app_context *ctx) {
     if (!ctx) return;
@@ -222,6 +247,8 @@ static void cleanup(struct app_context *ctx) {
         free(ctx->render.font);
         ctx->render.font = NULL;
     }
+
+    free_apps_vector(ctx);
 }
 
 

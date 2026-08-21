@@ -280,10 +280,11 @@ unsigned int optHandling(int argc, char **argv, struct app_context *ctx) {
             { "help", no_argument, 0, 'h'},
             { "version", no_argument, 0, 'v'},
             { "font", required_argument, 0, 'f'},
+            { "rebuild-cache", no_argument, 0, 'r' },
             { 0, 0, 0, 0},
         };
 
-        opt = getopt_long(argc, argv, "hvf", long_options, &option_index);
+        opt = getopt_long(argc, argv, "hvf:r", long_options, &option_index);
         if (opt == -1) return 0;
 
         switch (opt) {
@@ -296,6 +297,9 @@ unsigned int optHandling(int argc, char **argv, struct app_context *ctx) {
             case 'f':
                 strncpy(ctx->render.font, optarg, MAX_APP_NAME_LENGTH - 1);
                 ctx->render.font[MAX_APP_NAME_LENGTH - 1] = '\0';
+                break;
+            case 'r':
+                ctx->force_rebuild_cache = 1;
                 break;
         }
     }
