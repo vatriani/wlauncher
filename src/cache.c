@@ -1,4 +1,3 @@
-#define _GNU_SOURCE
 #include "cache.h"
 
 #include <sys/stat.h>

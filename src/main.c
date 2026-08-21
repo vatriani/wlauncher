@@ -6,10 +6,8 @@
 #include "parser.h"
 #include "buffer.h"
 #include "cache.h"
-
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
-
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +42,7 @@ int main(int argc, char **argv) {
     struct app_context stack_ctx;
     register struct app_context *ctx = &stack_ctx;
     memset(ctx, 0, sizeof(struct app_context));
-
+    ctx->force_rebuild_cache = 0;
     vector_init(&ctx->apps);
 
     atexit_ctx_ptr = ctx;
@@ -53,10 +51,10 @@ int main(int argc, char **argv) {
 #ifndef DEBUG
     if (checkIfRunning()) return 0;
 #endif
-    ctx->force_rebuild_cache = 0;
     zombieProtect();
     config_fill_defaults(ctx);
     if (optHandling(argc, argv, ctx)) return -1;
+
     if (configLoad(&ctx->config))
         printf("[wlauncher] falling back to default values\n");
     else {
@@ -73,7 +71,6 @@ int main(int argc, char **argv) {
 
     if (setup_ctx(ctx) != 0) return -1;
 
-    /* Warten bis initiales configure verarbeitet wurde */
     wl_display_roundtrip(ctx->render.display);
 
     if (ctx->render.width <= 0 || ctx->render.height <= 0) {
@@ -151,14 +148,28 @@ static int setup_ctx(struct app_context *ctx) {
 
 static void free_apps_vector(struct app_context *ctx) {
     if (!ctx) return;
-    if (!ctx->apps.pfVectorTotal || !ctx->apps.pfVectorGet || !ctx->apps.pfVectorFree) return;
 
-    int total = ctx->apps.pfVectorTotal(&ctx->apps);
-    for (int i = 0; i < total; ++i) {
-        app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
-        free(app);
+    if (!ctx->apps.vectorList.items || ctx->apps.vectorList.total <= 0) {
+        if (ctx->apps.vectorList.items == NULL) {
+            ctx->apps.vectorList.capacity = 0;
+            ctx->apps.vectorList.total = 0;
+        }
+        return;
     }
-    ctx->apps.pfVectorFree(&ctx->apps);
+
+    int total = ctx->apps.pfVectorTotal ? ctx->apps.pfVectorTotal(&ctx->apps) : ctx->apps.vectorList.total;
+    for (int i = 0; i < total; ++i) {
+        app_info *app = (app_info *)(ctx->apps.pfVectorGet ? ctx->apps.pfVectorGet(&ctx->apps, i)
+                                                            : ctx->apps.vectorList.items[i]);
+        free(app);
+        if (ctx->apps.vectorList.items) ctx->apps.vectorList.items[i] = NULL;
+    }
+
+    if (ctx->apps.pfVectorFree) ctx->apps.pfVectorFree(&ctx->apps);
+
+    ctx->apps.vectorList.items = NULL;
+    ctx->apps.vectorList.total = 0;
+    ctx->apps.vectorList.capacity = 0;
 }
 
 
@@ -166,10 +177,10 @@ static void free_apps_vector(struct app_context *ctx) {
 static void cleanup(struct app_context *ctx) {
     if (!ctx) return;
 
-    /* 1) Cairo/SHM zuerst */
+    /* 1) Cairo/SHM */
     cairo_cleanup(ctx);
 
-    /* 2) Surface sauber ablösen */
+    /* 2) Surface*/
     if (ctx->render.surface) {
         wl_surface_attach(ctx->render.surface, NULL, 0, 0);
         wl_surface_commit(ctx->render.surface);
@@ -237,7 +248,7 @@ static void cleanup(struct app_context *ctx) {
         ctx->render.xkb_context = NULL;
     }
 
-    /* 5) display zuletzt */
+    /* 5) display */
     if (ctx->render.display) {
         wl_display_disconnect(ctx->render.display);
         ctx->render.display = NULL;

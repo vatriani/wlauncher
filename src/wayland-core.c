@@ -300,7 +300,7 @@ static void output_handle_scale(void *data, struct wl_output *wl_output,
 
 
 
-static const struct wl_output_listener output_listener = {
+const struct wl_output_listener output_listener = {
     .geometry = output_handle_geometry,
     .mode = output_handle_mode,
     .done = output_handle_done,

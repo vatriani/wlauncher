@@ -8,10 +8,7 @@
  */
 #ifndef VECTOR_H
 #define VECTOR_H
-
 #define _GNU_SOURCE
-
-
 
 //Store and track the stored data
 typedef struct sVectorList {
@@ -19,8 +16,6 @@ typedef struct sVectorList {
     int capacity;
     int total;
 } sVectorList;
-
-
 
 //structure contain the function pointer
 typedef struct sVector vector;
@@ -36,8 +31,6 @@ struct sVector {
     int (*pfVectorDelete)(vector *, int);
     int (*pfVectorFree)(vector *);
 };
-
-
 
 void vector_init(vector *v);
 

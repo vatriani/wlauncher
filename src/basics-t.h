@@ -8,7 +8,6 @@
  */
 #ifndef BASICS_T_H
 #define BASICS_T_H
-
 #define _GNU_SOURCE
 
 #include "vector.h"

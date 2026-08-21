@@ -1,5 +1,6 @@
 #ifndef WAYLAND_CORE_H
 #define WAYLAND_CORE_H
+#define _GNU_SOURCE
 
 #include "types.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -7,5 +8,5 @@
 
 extern const struct wl_registry_listener registry_listener;
 extern const struct zwlr_layer_surface_v1_listener layer_surface_listener;
-
+extern const struct wl_output_listener output_listener;
 #endif

@@ -1,4 +1,4 @@
-#define _GNU_SOURCE
+#include "parser.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -9,8 +9,6 @@
 #include <unistd.h>
 #include <wayland-client.h>
 #include <ctype.h>
-
-#include "parser.h"
 
 
 

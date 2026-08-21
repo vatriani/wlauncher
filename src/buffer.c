@@ -1,4 +1,6 @@
-#define _GNU_SOURCE
+#include "buffer.h"
+#include "parser.h"
+#include "types.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -8,10 +10,6 @@
 #include <wayland-client.h>
 #include <cairo.h>
 #include <pango/pangocairo.h>
-
-#include "buffer.h"
-#include "parser.h"
-#include "types.h"
 
 
 

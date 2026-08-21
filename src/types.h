@@ -1,8 +1,9 @@
 #ifndef TYPES_H
 #define TYPES_H
-
 #define _GNU_SOURCE
+
 #include "basics-t.h"
+
 #include <xkbcommon/xkbcommon.h>
 #include <cairo.h>
 #include <pango/pangocairo.h>
