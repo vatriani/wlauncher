@@ -44,10 +44,6 @@ int main(int argc, char **argv) {
     register struct app_context *ctx = &stack_ctx;
     memset(ctx, 0, sizeof(struct app_context));
 
-
-    //ctx->width = 0;
-    //ctx->height = 24;
-
 #ifndef DEBUG
     if (checkIfRunning()) return 0;
 #endif
@@ -64,8 +60,25 @@ int main(int argc, char **argv) {
 
     scan_applications(ctx);
     find_best_matches(ctx, "");
-    setup_ctx(ctx);
-    setupCairo(ctx);
+    if (setup_ctx(ctx) != 0) return -1;
+
+    /* Warten bis initiales configure verarbeitet wurde */
+    wl_display_roundtrip(ctx->render.display);
+
+    if (ctx->render.width <= 0 || ctx->render.height <= 0) {
+        fprintf(stderr, "No valid configure size received\n");
+        return -1;
+    }
+
+    if (setupCairo(ctx) != 0) {
+        fprintf(stderr, "setupCairo failed\n");
+        return -1;
+    }
+
+    if (ctx->render.width > 0 && ctx->render.height > 0) {
+        ctx->render.buffer_busy = 0;
+        draw_frame(ctx);
+    }
 
 #ifdef DEBUG
     printf("wlauncher: Waiting for input...\n");
@@ -84,6 +97,7 @@ int main(int argc, char **argv) {
 
 static int setup_ctx(struct app_context *ctx) {
     ctx->render.xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    ctx->render.width = 0;
 
     ctx->render.display = wl_display_connect(NULL);
     if (!ctx->render.display) return 1;
@@ -92,7 +106,7 @@ static int setup_ctx(struct app_context *ctx) {
     wl_registry_add_listener(ctx->render.registry, &registry_listener, ctx);
     wl_display_roundtrip(ctx->render.display);
 
-    if (!ctx->render.compositor || !ctx->render.layer_shell || !ctx->render.shm) {
+    if (!ctx->render.compositor || !ctx->render.layer_shell || !ctx->render.wl_shm) {
 #ifdef DEBGUG
         fprintf(stderr, "Err: crittical Wayland handler missing.\n");
 #endif

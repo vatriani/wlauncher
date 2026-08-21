@@ -59,7 +59,7 @@ struct render_context_t {
     struct wl_registry            *registry;
     struct wl_compositor          *compositor;
     struct zwlr_layer_shell_v1    *layer_shell;
-    struct wl_shm                 *shm;
+    struct wl_shm                 *wl_shm;
     struct wl_seat                *seat;
     struct wl_keyboard            *keyboard;
     struct wl_surface             *surface;
@@ -70,6 +70,8 @@ struct render_context_t {
     uint32_t                      *fhm_data;
     int                            fhm_stride;
     int                            fhm_size;
+    int                            buffer_busy;
+    int                            needs_redraw;
 
     cairo_t                       *cr;
     cairo_surface_t               *cairo_surface;

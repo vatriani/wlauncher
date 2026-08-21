@@ -1,5 +1,5 @@
 override CC = gcc
-CFLAGS = -O2 -fdata-sections -ffunction-sections -pedantic-errors -std=gnu11 -Wall -Wextra -fstack-protector-strong -fPIE $(shell pkg-config --cflags wayland-client cairo pango pangocairo xkbcommon)
+CFLAGS = -O2 -g -fdata-sections -ffunction-sections -pedantic-errors -std=gnu11 -Wall -Wextra -fstack-protector-strong -fPIE $(shell pkg-config --cflags wayland-client cairo pango pangocairo xkbcommon)
 LIBS = $(shell pkg-config --libs wayland-client cairo pango pangocairo xkbcommon) -Wl,--gc-sections,-z,relro,-z,now
 
 ifneq ($(shell pkg-config --exists wlr-protocols && echo yes),yes)

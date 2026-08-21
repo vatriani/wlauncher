@@ -25,10 +25,9 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
         return;
     }
 
-    char *map_str = mmap(NULL, ctx->render.fhm_size, PROT_READ, MAP_SHARED,
-            ctx->render.fhm_fd, 0);
+    char *map_str = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
     if (map_str == MAP_FAILED) {
-        close(ctx->render.fhm_fd);
+        close(fd);
         return;
     }
 
@@ -37,8 +36,8 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
 
     ctx->render.xkb_keymap = xkb_keymap_new_from_string(ctx->render.xkb_context,
             map_str, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
-    munmap(map_str, ctx->render.fhm_size);
-    close(ctx->render.fhm_fd);
+    munmap(map_str, size);
+    close(fd);
 
     if (!ctx->render.xkb_keymap) return;
     ctx->render.xkb_state = xkb_state_new(ctx->render.xkb_keymap);
@@ -239,7 +238,7 @@ void registry_handle_global(void *data, struct wl_registry *registry, uint32_t i
     }
     else if (strncmp(interface, "wl_shm", 6) == 0) {
         uint32_t bind_ver = (version < 1) ? version : 1;
-        ctx->render.shm = wl_registry_bind(registry, id, &wl_shm_interface,
+        ctx->render.wl_shm = wl_registry_bind(registry, id, &wl_shm_interface,
                 bind_ver);
     }
     else if (strncmp(interface, "wl_seat", 7) == 0) {
@@ -319,12 +318,14 @@ static void layer_surface_configure(void *data,
 
     if (width > 0) ctx->render.width = width;
     if (height > 0) ctx->render.height = height;
-
+/*
     if (ctx->render.width > 0 && !ctx->configured) {
         ctx->configured = 1;
         draw_frame(ctx);
     }
-    else if (ctx->render.width > 0 && ctx->configured) draw_frame(ctx);
+    else */
+    fprintf(stderr, "configure: %ux%u ready=%d\n", width, height, ctx->configured);
+    if (ctx->render.width > 0 && ctx->configured) draw_frame(ctx);
 }
 
 
