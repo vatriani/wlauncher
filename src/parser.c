@@ -116,6 +116,7 @@ void scan_applications(struct app_context *ctx) {
 
                     snprintf(app->name, sizeof(app->name), "%s", temp_name);
                     snprintf(app->exec, sizeof(app->exec), "%s", temp_exec);
+                    app->usage_score = SCORE_APPSTART_BONI;
 
                     if (ctx->apps.pfVectorAdd(&ctx->apps, app) != 0) {
                         free(app);
@@ -138,14 +139,12 @@ int get_fuzzy_score(const char *str, const char *search) {
     if (!search || *search == '\0' || !str || *str == '\0') return -1;
 
     char *exact_match = strcasestr(str, search);
-    if (exact_match) {
-        return (int)(exact_match - str);
-    }
+    if (exact_match) return (int)(exact_match - str); // 0 = best
 
     const char *s = search;
     const char *p = str;
 
-    int score = 2000;
+    int fuzzy_score = SCORE_FUZZY_BASE;
     int matches = 0;
     int search_len = strlen(search);
 
@@ -160,25 +159,22 @@ int get_fuzzy_score(const char *str, const char *search) {
                 found = 1;
                 break;
             }
-            distance++;
-            p_look++;
+            ++distance;
+            ++p_look;
         }
 
         if (found) {
-            matches++;
-            score += distance * 10;
+            ++matches;
+            fuzzy_score += distance * SCORE_FUZZY_MATCH;
             p = p_look + 1;
-        } else score += 100;
+        } else {
+            fuzzy_score += SCORE_FUZZY_MALI;
+        }
         ++s;
     }
 
     int required_matches = (search_len > 3) ? (search_len / 2) : 1;
-
-    if (matches >= required_matches) {
-        return score;
-    }
-
-    return -1;
+    return (matches >= required_matches) ? fuzzy_score : -1;
 }
 
 
@@ -187,11 +183,35 @@ int compare_cached_entries(const void *a, const void *b) {
     const sorted_entry *entryA = (const sorted_entry *)a;
     const sorted_entry *entryB = (const sorted_entry *)b;
 
-    if (entryA->score != entryB->score) return entryA->score - entryB->score;
+    if (entryA->score < entryB->score) return -1;
+    if (entryA->score > entryB->score) return 1;
 
-    if (entryA->app < entryB->app) return -1;
-    if (entryA->app > entryB->app) return 1;
-    return 0;
+    return strcasecmp(entryA->app->name, entryB->app->name);
+}
+
+
+
+static int score_name_match(const char *name, const char *search) {
+    if (!name || !search || !*search) return -1;
+
+    if (strcasecmp(name, search) == 0) return 0;
+
+    size_t qlen = strlen(search);
+    if (strncasecmp(name, search, qlen) == 0) return 2;
+
+    int s = get_fuzzy_score(name, search);
+    return (s > 0) ? s : -1;
+}
+
+
+
+static int score_exec_match(const char *exec, const char *search) {
+    if (!exec || !search || !*search) return -1;
+
+    int s = get_fuzzy_score(exec, search);
+    if (s <= 0) return -1;
+
+    return s + SCORE_FUZZY_MALI_EXEC;
 }
 
 
@@ -211,7 +231,10 @@ void find_best_matches(struct app_context *ctx, const char *search) {
             app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
             if (!app) continue;
             temp_entries[temp_count].app = app;
-            temp_entries[temp_count].score = 0;
+            int usage_bonus = (int)(app->usage_score * SCORE_APPSTART_WEIGHT);
+            int score = 1000 - usage_bonus;
+            if (score < 0) score = 0;
+            temp_entries[temp_count].score = score;
             ++temp_count;
         }
 
@@ -230,15 +253,23 @@ void find_best_matches(struct app_context *ctx, const char *search) {
         app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
         if (!app) continue;
 
-        int name_score = get_fuzzy_score(app->name, search);
-        int exec_score = get_fuzzy_score(app->exec, search);
+        int name_score = score_name_match(app->name, search);
+        int exec_score = score_exec_match(app->exec, search);
 
         if (name_score != -1 || exec_score != -1) {
-            int final_score = 100000;
+            int final_score;
 
-            if (name_score != -1) final_score = name_score;
-            else if (exec_score != -1) final_score = exec_score + 5000;
+            // Name has priority over Exec
+            if (name_score != -1 && exec_score != -1)
+                final_score = (name_score < exec_score) ? name_score : exec_score;
+            else if (name_score != -1)
+                final_score = name_score;
+            else
+                final_score = exec_score;
 
+            // usage should improve rank => reduce score
+            final_score -= (int)(app->usage_score * SCORE_APPSTART_WEIGHT);
+            if (final_score < 0) final_score = 0;
             temp_entries[temp_count].app = app;
             temp_entries[temp_count].score = final_score;
             ++temp_count;
@@ -249,8 +280,9 @@ void find_best_matches(struct app_context *ctx, const char *search) {
         qsort(temp_entries, temp_count, sizeof(sorted_entry), compare_cached_entries);
 
     ctx->matched_count = (temp_count > MAX_MATCHED_APPS) ? MAX_MATCHED_APPS : temp_count;
-    for (int i = 0; i < ctx->matched_count; ++i)
+    for (int i = 0; i < ctx->matched_count; ++i) {
         ctx->matched_apps[i] = temp_entries[i].app;
+    }
 
     free(temp_entries);
 }

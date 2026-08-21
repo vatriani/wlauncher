@@ -2,6 +2,7 @@
 #include "wayland-core.h"
 #include "buffer.h"
 #include "parser.h"
+#include "cache.h"
 
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
@@ -109,23 +110,46 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
         }
 
         if (key == KEY_ENTER) {
-           const char *exec_cmd = NULL;
+            const char *exec_cmd = NULL;
+            app_info *selected_app = NULL;
 
-            if (ctx->matched_count > 0 && ctx->matched_index <
-                    ctx->matched_count) {
-               exec_cmd = ctx->matched_apps[ctx->matched_index]->exec;
+            if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
+                selected_app = (app_info *)ctx->matched_apps[ctx->matched_index];
+                exec_cmd = selected_app->exec;
 #ifdef DEBUG
-               printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
-                      ctx->matched_index, ctx->matched_apps[ctx->matched_index]->name, exec_cmd);
+                printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
+                    ctx->matched_index, selected_app->name, exec_cmd);
 #endif
-            } else
-               exec_cmd = ctx->input_buffer;
+            }
+            else {
+                exec_cmd = ctx->input_buffer;
+            }
 
             if (exec_cmd && exec_cmd[0] != '\0') {
+                // 1) global decay auf ALLE apps
+                int total = ctx->apps.pfVectorTotal(&ctx->apps);
+                for (int i = 0; i < total; ++i) {
+                    app_info *app = (app_info *)ctx->apps.pfVectorGet(&ctx->apps, i);
+                    if (!app) continue;
+
+                    app->usage_score *= SCORE_APPSTART_DOWN;
+                    if (app->usage_score < SCORE_APPSTART_EPSILON)
+                    app->usage_score = 0.0;
+                }
+
+                // 2) boost für ausgewählte App (nur wenn aus Matchliste gestartet)
+                if (selected_app) {
+                    selected_app->usage_score += SCORE_APPSTART_UP;
+                    if (selected_app->usage_score > SCORE_APPSTART_CLAMP)
+                        selected_app->usage_score = SCORE_APPSTART_CLAMP;
+                }
+
+                // optional: cache direkt persistieren (falls Funktion vorhanden)
+                cache_store(ctx);
+
                 pid_t pid = fork();
                 if (pid == 0) {
                     setsid();
-
                     for (int i = 3; i < 1024; ++i) close(i);
 
                     int devnull = open("/dev/null", O_WRONLY);
@@ -141,6 +165,7 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
                     perror("wlauncher: fork error");
                 }
             }
+
             ctx->running = 0;
             return;
         }

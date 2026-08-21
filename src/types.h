@@ -14,6 +14,18 @@
 #define MAX_APP_NAME_LENGTH 256
 #define APP_NAME "wlauncher"
 
+#define SCORE_APPSTART_CLAMP  10.0   ///< highest score
+#define SCORE_APPSTART_UP      0.2   ///< SCORE = SCORE + SCORE_UP score at exec
+#define SCORE_APPSTART_DOWN    0.95  ///< SCORE = SCORE * SCORE_DOWN score mali
+#define SCORE_APPSTART_BONI    0.2   ///< starts at SCORE_BONI e.g. new app boni
+#define SCORE_APPSTART_WEIGHT 15.0   ///< ranking bonus factor (score -> sort impact)
+#define SCORE_APPSTART_EPSILON 0.001 ///< values below become 0
+
+#define SCORE_FUZZY_MATCH      40     ///< score bonus when input str matches program
+#define SCORE_FUZZY_BASE      100     ///< fuzzy score start
+#define SCORE_FUZZY_MALI        5     ///< fuzzy score mali
+#define SCORE_FUZZY_MALI_EXEC 200     ///< mali for exec
+
 #define DEF_BG_COL_R         0.117    ///< fallback bg color red
 #define DEF_BG_COL_G         0.117    ///< fallback bg color green
 #define DEF_BG_COL_B         0.180    ///< fallback bg color blue
@@ -33,6 +45,7 @@ typedef struct app_info_t app_info;
 struct app_info_t {
     char name[MAX_NAME_LENGTH];
     char exec[MAX_NAME_LENGTH];
+    double usage_score;
 };
 
 

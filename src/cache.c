@@ -11,14 +11,18 @@
 #include <errno.h>
 
 #define CACHE_MAGIC "WLAC"
-#define CACHE_VERSION 1
+#define CACHE_VERSION 2
 #define CACHE_DIR_COUNT 3
+
+
 
 static const char *base_paths[CACHE_DIR_COUNT] = {
     "/.local/share/applications",
     "/usr/share/applications",
     "/usr/local/share/applications"
 };
+
+
 
 typedef struct cache_dir_fp_t {
     uint64_t dev;
@@ -27,6 +31,8 @@ typedef struct cache_dir_fp_t {
     int64_t  mtime_nsec;
 } cache_dir_fp;
 
+
+
 typedef struct cache_header_t {
     char     magic[4];
     uint32_t version;
@@ -34,10 +40,7 @@ typedef struct cache_header_t {
     uint32_t app_count;
 } cache_header;
 
-typedef struct cache_app_record_t {
-    char name[MAX_NAME_LENGTH];
-    char exec[MAX_NAME_LENGTH];
-} cache_app_record;
+
 
 static int get_cache_file_path(char *out, size_t out_sz) {
     const char *xdg_cache = getenv("XDG_CACHE_HOME");
@@ -161,7 +164,7 @@ int cache_load_if_valid(struct app_context *ctx) {
     clear_apps_vector(ctx);
 
     for (uint32_t i = 0; i < hdr.app_count; ++i) {
-        cache_app_record rec;
+        app_info rec;
         if (fread(&rec, sizeof(rec), 1, f) != 1) {
             fclose(f);
             clear_apps_vector(ctx);
@@ -179,6 +182,7 @@ int cache_load_if_valid(struct app_context *ctx) {
         memcpy(app->exec, rec.exec, sizeof(app->exec));
         app->name[MAX_NAME_LENGTH - 1] = '\0';
         app->exec[MAX_NAME_LENGTH - 1] = '\0';
+        app->usage_score = rec.usage_score;
 
         if (ctx->apps.pfVectorAdd(&ctx->apps, app) != 0) {
             free(app);
@@ -226,10 +230,11 @@ int cache_store(const struct app_context *ctx) {
         app_info *app = (app_info *)ctx->apps.pfVectorGet((vector *)&ctx->apps, i);
         if (!app) continue;
 
-        cache_app_record rec;
+        app_info rec;
         memset(&rec, 0, sizeof(rec));
         memcpy(rec.name, app->name, sizeof(rec.name));
         memcpy(rec.exec, app->exec, sizeof(rec.exec));
+        rec.usage_score = app->usage_score;
 
         if (fwrite(&rec, sizeof(rec), 1, f) != 1) {
             fclose(f);
