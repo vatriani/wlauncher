@@ -1,7 +1,6 @@
-CC = gcc
-CFLAGS = -O2 -fdata-sections -ffunction-sections -pedantic-errors -std=gnu11 -march=native -mtune=native -Wall -Wextra -fstack-protector-strong -fPIE -flto $(shell pkg-config --cflags wayland-client cairo pango pangocairo xkbcommon)
-LIBS = $(shell pkg-config --libs wayland-client cairo pango pangocairo xkbcommon) -flto -Wl,--gc-sections,-z,relro,-z,now
-
+override CC = gcc
+CFLAGS = -O2 -fdata-sections -ffunction-sections -pedantic-errors -std=gnu11 -Wall -Wextra -fstack-protector-strong -fPIE $(shell pkg-config --cflags wayland-client cairo pango pangocairo xkbcommon)
+LIBS = $(shell pkg-config --libs wayland-client cairo pango pangocairo xkbcommon) -Wl,--gc-sections,-z,relro,-z,now
 
 ifneq ($(shell pkg-config --exists wlr-protocols && echo yes),yes)
     PROTOCOLS_DIR = $(shell pkg-config --variable=pkgdatadir wayland-protocols)
@@ -16,7 +15,7 @@ XDG_SHELL_XML = $(WAYLAND_PROTOCOLS_DIR)/stable/xdg-shell/xdg-shell.xml
 
 TARGET = wlauncher
 
-SRC = src/buffer.c src/main.c src/wayland-core.c src/window.c src/parser.c src/wlr-layer-shell-unstable-v1.c src/xdg-shell.c
+SRC = src/basics.c src/vector.c src/parser.c src/buffer.c src/wayland-core.c src/main.c src/wlr-layer-shell-unstable-v1.c src/xdg-shell.c
 GEN_FILES = src/wlr-layer-shell-unstable-v1-client-protocol.h src/wlr-layer-shell-unstable-v1.c src/xdg-shell-client-protocol.h src/xdg-shell.c
 OBJS = $(SRC:.c=.o)
 
@@ -33,13 +32,16 @@ src/%.o: src/%.c $(GEN_FILES)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
 
 clean:
-	rm -f $(TARGET) src/wlr-layer-shell-unstable-v1.* src/xdg-shell.*
+	rm -f $(TARGET) src/wlr-layer* src/xdg-shell* src/*.o
 
 .PHONY: all clean
 
 install: $(TARGET)
 	cp $(TARGET) /usr/bin/$(TARGET)
-	chmod go+rx /usr/bin/$(TARGET)
+	chmod 0777 /usr/bin/$(TARGET)
+
+uninstall:
+	rm /usr/bin/$(TARGET)
