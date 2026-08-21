@@ -1,6 +1,6 @@
 # Maintainer: vatriani <vatriani.nn@googlemail.com>
 pkgname=wlauncher
-pkgver=0.2.1
+pkgver=0.2.2
 pkgrel=1
 pkgdesc='simple and fast program launcher for hyprland'
 arch=('x86_64')
