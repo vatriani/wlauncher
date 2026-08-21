@@ -19,5 +19,4 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: make
-      working-directory: ./host/
       run: make
