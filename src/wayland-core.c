@@ -1,6 +1,8 @@
+#include "types.h"
 #include "wayland-core.h"
 #include "buffer.h"
 #include "parser.h"
+
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -13,7 +15,8 @@
 
 
 
-static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard, uint32_t format, int32_t fd, uint32_t size) {
+static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard,
+        uint32_t format, int32_t fd, uint32_t size) {
     register struct app_context *ctx = (struct app_context *)data;
     (void)keyboard;
 
@@ -22,21 +25,23 @@ static void keyboard_handle_keymap(void *data, struct wl_keyboard *keyboard, uin
         return;
     }
 
-    char *map_str = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+    char *map_str = mmap(NULL, ctx->render.fhm_size, PROT_READ, MAP_SHARED,
+            ctx->render.fhm_fd, 0);
     if (map_str == MAP_FAILED) {
-        close(fd);
+        close(ctx->render.fhm_fd);
         return;
     }
 
-    if (ctx->xkb_keymap) xkb_keymap_unref(ctx->xkb_keymap);
-    if (ctx->xkb_state)  xkb_state_unref(ctx->xkb_state);
+    if (ctx->render.xkb_keymap) xkb_keymap_unref(ctx->render.xkb_keymap);
+    if (ctx->render.xkb_state)  xkb_state_unref(ctx->render.xkb_state);
 
-    ctx->xkb_keymap = xkb_keymap_new_from_string(ctx->xkb_context, map_str, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
-    munmap(map_str, size);
-    close(fd);
+    ctx->render.xkb_keymap = xkb_keymap_new_from_string(ctx->render.xkb_context,
+            map_str, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    munmap(map_str, ctx->render.fhm_size);
+    close(ctx->render.fhm_fd);
 
-    if (!ctx->xkb_keymap) return;
-    ctx->xkb_state = xkb_state_new(ctx->xkb_keymap);
+    if (!ctx->render.xkb_keymap) return;
+    ctx->render.xkb_state = xkb_state_new(ctx->render.xkb_keymap);
 }
 
 
@@ -63,8 +68,9 @@ static void keyboard_handle_leave(void *data, struct wl_keyboard *keyboard, uint
 static void keyboard_handle_modifiers(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group) {
     register struct app_context *ctx = (struct app_context *)data;
     (void)keyboard; (void)serial;
-    if (ctx->xkb_state) {
-        xkb_state_update_mask(ctx->xkb_state, mods_depressed, mods_latched, mods_locked, 0, 0, group);
+    if (ctx->render.xkb_state) {
+        xkb_state_update_mask(ctx->render.xkb_state, mods_depressed,
+                mods_latched, mods_locked, 0, 0, group);
     }
 }
 
@@ -77,7 +83,8 @@ static void keyboard_handle_repeat_info(void *data, struct wl_keyboard *keyboard
 
 
 /* KEY-EVENT */
-static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32_t serial, uint32_t time, uint32_t key, uint32_t state) {
+static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard,
+        uint32_t serial, uint32_t time, uint32_t key, uint32_t state) {
     register struct app_context *ctx = (struct app_context *)data;
     (void)serial; (void)time; (void)keyboard;
 
@@ -91,28 +98,29 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
 
         if (key == KEY_RIGHT && ctx->matched_count > 0) {
             ctx->matched_index = (ctx->matched_index + 1) % ctx->matched_count;
-            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
+            if (ctx->configured && ctx->render.width > 0) draw_frame(ctx);
             return;
         }
 
         if (key == KEY_LEFT && ctx->matched_count > 0) {
-            ctx->matched_index = (ctx->matched_index - 1 + ctx->matched_count) % ctx->matched_count;
-            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
+            ctx->matched_index = (ctx->matched_index - 1 + ctx->matched_count)
+                    % ctx->matched_count;
+            if (ctx->configured && ctx->render.width > 0) draw_frame(ctx);
             return;
         }
 
         if (key == KEY_ENTER) {
            const char *exec_cmd = NULL;
 
-           if (ctx->matched_count > 0 && ctx->matched_index < ctx->matched_count) {
+            if (ctx->matched_count > 0 && ctx->matched_index <
+                    ctx->matched_count) {
                exec_cmd = ctx->matched_apps[ctx->matched_index]->exec;
 #ifdef DEBUG
                printf("wlauncher: Starte Vorschlag [%d]: %s via '%s'\n",
                       ctx->matched_index, ctx->matched_apps[ctx->matched_index]->name, exec_cmd);
 #endif
-           } else {
+            } else
                exec_cmd = ctx->input_buffer;
-           }
 
             if (exec_cmd && exec_cmd[0] != '\0') {
                 pid_t pid = fork();
@@ -147,14 +155,17 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
             find_best_matches(ctx, ctx->input_buffer);
 
 #ifdef DEBUG
-            printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer, ctx->matched_count);
+            printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer,
+                    ctx->matched_count);
 #endif
-            if (ctx->configured && ctx->width > 0) draw_frame(ctx);
+            if (ctx->configured && ctx->render.width > 0) draw_frame(ctx);
             return;
         }
 
         char utf8_buf[8] = {0};
-        if (ctx->xkb_state && xkb_state_key_get_utf8(ctx->xkb_state, xkb_keycode, utf8_buf, sizeof(utf8_buf)) > 0) {
+        if (ctx->render.xkb_state && xkb_state_key_get_utf8(
+                    ctx->render.xkb_state, xkb_keycode, utf8_buf,
+                    sizeof(utf8_buf)) > 0) {
             char c = utf8_buf[0];
 
             if (c >= 32 && ctx->input_length < 255) {
@@ -165,9 +176,10 @@ static void keyboard_handle_key(void *data, struct wl_keyboard *keyboard, uint32
                 find_best_matches(ctx, ctx->input_buffer);
 
 #ifdef DEBUG
-                printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer, ctx->matched_count);
+                printf("Eingabe: %s (Treffer: %d)\n", ctx->input_buffer,
+                        ctx->matched_count);
 #endif
-                if (ctx->configured && ctx->width > 0) draw_frame(ctx);
+                if (ctx->configured && ctx->render.width > 0) draw_frame(ctx);
             }
         }
     }
@@ -185,17 +197,19 @@ static const struct wl_keyboard_listener keyboard_listener = {
 
 
 
-static void seat_handle_capabilities(void *data, struct wl_seat *seat, uint32_t capabilities) {
+static void seat_handle_capabilities(void *data, struct wl_seat *seat,
+        uint32_t capabilities) {
     register struct app_context *ctx = (struct app_context *)data;
     if (capabilities & WL_SEAT_CAPABILITY_KEYBOARD) {
-        ctx->keyboard = wl_seat_get_keyboard(seat);
-        wl_keyboard_add_listener(ctx->keyboard, &keyboard_listener, ctx);
+        ctx->render.keyboard = wl_seat_get_keyboard(seat);
+        wl_keyboard_add_listener(ctx->render.keyboard, &keyboard_listener, ctx);
     }
 }
 
 
 
-static void seat_handle_name(void *data, struct wl_seat *seat, const char *name) {
+static void seat_handle_name(void *data, struct wl_seat *seat,
+        const char *name) {
     (void)data; (void)seat; (void)name;
 }
 
@@ -215,23 +229,31 @@ void registry_handle_global(void *data, struct wl_registry *registry, uint32_t i
 
     if (strncmp(interface, "wl_compositor", 13) == 0) {
         uint32_t bind_ver = (version < 4) ? version : 4;
-        ctx->compositor = wl_registry_bind(registry, id, &wl_compositor_interface, bind_ver);
-    } else if (strncmp(interface, "zwlr_layer_shell_v1", 19) == 0) {
+        ctx->render.compositor = wl_registry_bind(registry, id,
+                &wl_compositor_interface, bind_ver);
+    }
+    else if (strncmp(interface, "zwlr_layer_shell_v1", 19) == 0) {
         uint32_t bind_ver = (version < 4) ? version : 4;
-        ctx->layer_shell = wl_registry_bind(registry, id, &zwlr_layer_shell_v1_interface, bind_ver);
-    } else if (strncmp(interface, "wl_shm", 6) == 0) {
+        ctx->render.layer_shell = wl_registry_bind(registry, id,
+                &zwlr_layer_shell_v1_interface, bind_ver);
+    }
+    else if (strncmp(interface, "wl_shm", 6) == 0) {
         uint32_t bind_ver = (version < 1) ? version : 1;
-        ctx->shm = wl_registry_bind(registry, id, &wl_shm_interface, bind_ver);
-    } else if (strncmp(interface, "wl_seat", 7) == 0) {
+        ctx->render.shm = wl_registry_bind(registry, id, &wl_shm_interface,
+                bind_ver);
+    }
+    else if (strncmp(interface, "wl_seat", 7) == 0) {
         uint32_t bind_ver = (version < 1) ? version : 1;
-        ctx->seat = wl_registry_bind(registry, id, &wl_seat_interface, bind_ver);
-        wl_seat_add_listener(ctx->seat, &seat_listener, ctx);
+        ctx->render.seat = wl_registry_bind(registry, id, &wl_seat_interface,
+                bind_ver);
+        wl_seat_add_listener(ctx->render.seat, &seat_listener, ctx);
     }
 }
 
 
 
-void registry_handle_global_remove(void *data, struct wl_registry *registry, uint32_t id) {
+void registry_handle_global_remove(void *data, struct wl_registry *registry,
+        uint32_t id) {
     (void)data; (void)registry; (void)id;
 }
 
@@ -240,4 +262,38 @@ void registry_handle_global_remove(void *data, struct wl_registry *registry, uin
 const struct wl_registry_listener registry_listener = {
     .global = registry_handle_global,
     .global_remove = registry_handle_global_remove,
+};
+
+
+
+static void layer_surface_configure(void *data,
+        struct zwlr_layer_surface_v1 *layer_surface, uint32_t serial,
+        uint32_t width, uint32_t height) {
+    register struct app_context *ctx = (struct app_context *)data;
+    zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+
+    if (width > 0) ctx->render.width = width;
+    if (height > 0) ctx->render.height = height;
+
+    if (ctx->render.width > 0 && !ctx->configured) {
+        ctx->configured = 1;
+        draw_frame(ctx);
+    }
+    else if (ctx->render.width > 0 && ctx->configured) draw_frame(ctx);
+}
+
+
+
+static void layer_surface_closed(void *data,
+        struct zwlr_layer_surface_v1 *layer_surface) {
+    register struct app_context *ctx = (struct app_context *)data;
+    (void)layer_surface;
+    ctx->running = 0;
+}
+
+
+
+const struct zwlr_layer_surface_v1_listener layer_surface_listener = {
+    .configure = layer_surface_configure,
+    .closed = layer_surface_closed,
 };

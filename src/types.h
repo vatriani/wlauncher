@@ -2,12 +2,29 @@
 #define TYPES_H
 
 #define _GNU_SOURCE
-
+#include "basics-t.h"
 #include <xkbcommon/xkbcommon.h>
+#include <cairo.h>
+#include <pango/pangocairo.h>
 
 #define MAX_APPS 512
 #define MAX_NAME_LENGTH 256
 #define MAX_MATCHED_APPS 10
+#define MAX_APP_NAME_LENGTH 256
+#define APP_NAME "wlauncher"
+
+#define DEF_BG_COL_R         0.117    ///< fallback bg color red
+#define DEF_BG_COL_G         0.117    ///< fallback bg color green
+#define DEF_BG_COL_B         0.180    ///< fallback bg color blue
+#define DEF_ACC_COL_R        0.321    ///< fallback accent color red
+#define DEF_ACC_COL_G        0.443    ///< fallback accent color green
+#define DEF_ACC_COL_B        0.654    ///< fallback accent color blue
+#define DEF_FG_COL_R           0.9    ///< fallback fg color red
+#define DEF_FG_COL_G           0.9    ///< fallback fg color green
+#define DEF_FG_COL_B           0.9    ///< fallback fg color blue
+#define DEF_PADDING              5    ///< fallback padding for drawing
+#define DEF_BAR_HEIGHT          16    ///< fallback bar height
+#define DEF_FONT  "DejaVu Sans 12"    ///< fallbacl font
 
 
 
@@ -18,7 +35,21 @@ struct app_info {
 
 
 
-struct app_context {
+typedef struct color_t color;
+struct color_t {
+    double r;    ///< Double value for red
+    double g;    ///< Double value for green
+    double b;    ///< Double value for blue
+};
+
+
+struct sorted_entry {
+    const struct app_info *app;
+    int score;
+};
+
+typedef struct render_context_t render_context;
+struct render_context_t {
     struct wl_display             *display;
     struct wl_registry            *registry;
     struct wl_compositor          *compositor;
@@ -29,27 +60,45 @@ struct app_context {
     struct wl_surface             *surface;
     struct zwlr_layer_surface_v1  *layer_surface;
     struct wl_buffer              *buffer;
+    struct wl_shm_pool            *pool;
+    int                            fhm_fd;
+    uint32_t                      *fhm_data;
+    int                            fhm_stride;
+    int                            fhm_size;
+
+    cairo_t                       *cr;
+    cairo_surface_t               *cairo_surface;
+    PangoLayout                   *pango_layout;
+    PangoFontDescription          *pango_font_desc;
+    char                          *font;
 
     struct xkb_context            *xkb_context;
     struct xkb_keymap             *xkb_keymap;
     struct xkb_state              *xkb_state;
 
+    color                          bg_color;
+    color                          fg_color;
+    color                          accent_color;
+    int                            padding;
+
+    int                            width;
+    int                            height;
+};
+
+
+struct app_context {
+    render_context                 render;
     char                           input_buffer[MAX_NAME_LENGTH];
     int                            input_length;
-
     struct app_info                apps[MAX_APPS];
     int                            app_count;
-
     const struct app_info         *matched_apps[MAX_MATCHED_APPS];
     int                            matched_count;
     int                            matched_index;
 
-    double                         bg_r, bg_g, bg_b;
-    double                         accent_r, accent_g, accent_b;
+    config_file                    config;
 
     int                            running;
-    int                            width;
-    int                            height;
     int                            configured;
 };
 
